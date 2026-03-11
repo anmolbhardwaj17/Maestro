@@ -464,6 +464,7 @@ export default function App() {
   }
 
   return (
+    <div className="controller-bg" style={{ backgroundImage: `url(${process.env.PUBLIC_URL}/splash-bg.png)` }}>
     <div className="controller fade-in">
       {showOnboarding && (
         <div className="onboarding-overlay" onClick={() => setShowOnboarding(false)}>
@@ -621,6 +622,7 @@ export default function App() {
 
         {renderDeck('B')}
       </div>
+    </div>
     </div>
   );
 }
