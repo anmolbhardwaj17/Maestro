@@ -149,8 +149,8 @@ export default function HandTracker({ onHandData }) {
       cancelled = true;
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       if (landmarkerRef.current) landmarkerRef.current.close();
-      if (videoRef.current?.srcObject) {
-        videoRef.current.srcObject.getTracks().forEach(t => t.stop());
+      if (video.srcObject) {
+        video.srcObject.getTracks().forEach(t => t.stop());
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
