@@ -1,70 +1,82 @@
-# Getting Started with Create React App
+<p align="center">
+  <img src="public/og-image.jpg" alt="Maestro — Gesture-Controlled DJ Controller" width="100%" />
+</p>
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+<p align="center">
+  <b>NO HARDWARE. NO TOUCH. JUST GESTURES.</b>
+</p>
 
-## Available Scripts
+<p align="center">
+  A browser-based DJ mixing console controlled entirely by hand gestures via your webcam.
+</p>
 
-In the project directory, you can run:
+---
 
-### `npm start`
+## What is Maestro?
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+Maestro is a fully browser-based DJ controller that uses **real-time hand tracking** to let you mix audio with mid-air gestures. No MIDI controller, no touchscreen — just your hands and a webcam.
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+## Features
 
-### `npm test`
+- **Gesture Control** — Pinch to grab, drag to adjust, tap to trigger
+- **Dual Decks** — Two independent audio decks with play/pause and tempo control
+- **3-Band EQ** — Low, mid, and high shelf filters per deck
+- **Filter Sweep** — Low-pass filter with full frequency range
+- **Delay FX** — Feedback delay effect per deck
+- **Crossfader** — Equal-power crossfade between decks
+- **8 Drum Pads** — Synthesized kick, snare, hi-hat, clap, tom, rim, perc, and FX
+- **Waveform Display** — Real-time waveform visualization with playback position
+- **Frequency Spectrum** — Live frequency analyzer per deck
+- **Magnetic Snapping** — Cursor auto-targets nearby controls for easier interaction
+- **Two-Hand Support** — Control two things simultaneously
+- **Drag & Drop** — Load any audio file by dragging it onto a deck
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+## Tech Stack
 
-### `npm run build`
+| Layer | Technology |
+|---|---|
+| Hand Tracking | MediaPipe Hand Landmarker (WASM + GPU) |
+| Audio Engine | Web Audio API |
+| Frontend | React 19 |
+| Sound Synthesis | Oscillators + noise buffers (no samples) |
+| Visualization | Canvas 2D |
+| Hosting | Vercel |
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+## How It Works
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+```
+Webcam → MediaPipe Hand Landmarker → 21 Landmarks per Hand
+  → Exponential Smoothing → Pinch Detection (hysteresis)
+    → Magnetic Snap to nearest UI control
+      → Drag delta x sensitivity → Audio parameter update
+```
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+1. **Show your hand** — Hold your hand in front of the webcam
+2. **Pinch to grab** — Touch your thumb and index finger to grab a control
+3. **Drag to adjust** — Move your hand while pinching to change values
+4. **Release to let go** — Open your fingers to drop the control
 
-### `npm run eject`
+## Getting Started
 
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
+```bash
+git clone https://github.com/anmolbhardwaj17/Maestro.git
+cd Maestro
+npm install
+npm start
+```
 
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+Open [http://localhost:3000](http://localhost:3000) and allow camera access.
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
+## Requirements
 
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
+- Modern browser (Chrome/Edge recommended for GPU-accelerated hand tracking)
+- Webcam
+- Audio files to mix (drag & drop onto the decks)
 
-## Learn More
+## Author
 
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
+**Anmol Bhardwaj** — [anmolbhardwaj.com](https://anmolbhardwaj.com)
 
-To learn React, check out the [React documentation](https://reactjs.org/).
+## License
 
-### Code Splitting
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
-
-### Analyzing the Bundle Size
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
-
-### Making a Progressive Web App
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
-
-### Advanced Configuration
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
-
-### Deployment
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
-
-### `npm run build` fails to minify
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+MIT
