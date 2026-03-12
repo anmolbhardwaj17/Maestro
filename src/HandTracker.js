@@ -11,10 +11,12 @@ const CONNECTIONS = [
   [0,17],[17,18],[18,19],[19,20],
 ];
 
-export default function HandTracker({ onHandData }) {
+export default function HandTracker({ onHandData, rotated, mobileScale }) {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const callbackRef = useRef(onHandData);
+  const rotatedRef = useRef(rotated);
+  const mobileScaleRef = useRef(mobileScale);
   const pinchStateRef = useRef([false, false]);
   const smoothRef = useRef([
     { x: 0, y: 0, initialized: false },
@@ -25,6 +27,8 @@ export default function HandTracker({ onHandData }) {
   const lastTimeRef = useRef(-1);
 
   useEffect(() => { callbackRef.current = onHandData; }, [onHandData]);
+  useEffect(() => { rotatedRef.current = rotated; }, [rotated]);
+  useEffect(() => { mobileScaleRef.current = mobileScale; }, [mobileScale]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -72,12 +76,16 @@ export default function HandTracker({ onHandData }) {
         const canvas = canvasRef.current;
         if (!canvas) return;
         const ctx = canvas.getContext('2d');
-        canvas.width = window.innerWidth;
-        canvas.height = window.innerHeight;
+        // In rotated mode, the container is 100vh wide x 100vw tall
+        const isRot = rotatedRef.current;
+        const screenW = isRot ? window.innerHeight : window.innerWidth;
+        const screenH = isRot ? window.innerWidth : window.innerHeight;
+        canvas.width = screenW;
+        canvas.height = screenH;
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-        const xRatio = window.innerWidth / video.videoWidth;
-        const yRatio = window.innerHeight / video.videoHeight;
+        const xRatio = screenW / video.videoWidth;
+        const yRatio = screenH / video.videoHeight;
 
         if (!results.landmarks || results.landmarks.length === 0) {
           smoothRef.current[0].initialized = false;
@@ -110,18 +118,25 @@ export default function HandTracker({ onHandData }) {
             (1 - thumbTip.x) - (1 - indexTip.x)
           );
 
+          // On mobile, amplify coordinates from center so hand range covers full controller
+          const ms = mobileScaleRef.current;
+          const amp = ms < 1 ? 1 / ms : 1;
+          const cX = screenW / 2, cY = screenH / 2;
+          const ampX = (x) => amp === 1 ? x : cX + (x - cX) * amp;
+          const ampY = (y) => amp === 1 ? y : cY + (y - cY) * amp;
+
           handsData.push({
-            x: sm.x, y: sm.y,
+            x: ampX(sm.x), y: ampY(sm.y),
             pinching: isPinched,
             justPinched: isPinched && !wasPinching,
             justReleased: !isPinched && wasPinching,
             pinchAngle,
           });
 
-          // Convert landmarks to screen coords
+          // Convert landmarks to screen coords (with mobile amplification)
           const pts = landmarks.map((lm) => ({
-            x: (1 - lm.x) * video.videoWidth * xRatio,
-            y: lm.y * video.videoHeight * yRatio,
+            x: ampX((1 - lm.x) * video.videoWidth * xRatio),
+            y: ampY(lm.y * video.videoHeight * yRatio),
           }));
 
           // Draw semi-transparent hand silhouette
@@ -181,8 +196,8 @@ export default function HandTracker({ onHandData }) {
 
   return (
     <>
-      <video ref={videoRef} autoPlay playsInline muted style={{ position:'fixed', bottom:12, right:12, width:160, borderRadius:10, transform:'scaleX(-1)', zIndex:999, border:'2px solid rgba(232,130,12,0.25)' }} />
-      <canvas ref={canvasRef} style={{ position:'fixed', top:0, left:0, width:'100vw', height:'100vh', zIndex:500, pointerEvents:'none' }} />
+      <video ref={videoRef} autoPlay playsInline muted className="webcam-preview" />
+      <canvas ref={canvasRef} style={{ position:'absolute', top:0, left:0, width:'100%', height:'100%', zIndex:500, pointerEvents:'none' }} />
     </>
   );
 }

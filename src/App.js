@@ -109,7 +109,8 @@ const CONTROL_DEFS = {
   crossfader:  { min: 0, max: 1, sens: 0.006, type: 'slider', horizontal: true },
 };
 
-function magneticSnap(rawX, rawY) {
+function magneticSnap(rawX, rawY, scale = 1) {
+  const radius = SNAP_RADIUS / scale;
   const controls = document.querySelectorAll('[data-control]');
   let nearest = null, nearestDist = Infinity, cx = rawX, cy = rawY;
   controls.forEach((el) => {
@@ -118,8 +119,8 @@ function magneticSnap(rawX, rawY) {
     const d = Math.hypot(rawX - ecx, rawY - ecy);
     if (d < nearestDist) { nearestDist = d; nearest = el.dataset.control; cx = ecx; cy = ecy; }
   });
-  if (nearest && nearestDist < SNAP_RADIUS) {
-    const t = SNAP_STRENGTH * (1 - nearestDist / SNAP_RADIUS);
+  if (nearest && nearestDist < radius) {
+    const t = SNAP_STRENGTH * (1 - nearestDist / radius);
     return { x: rawX + (cx - rawX) * t, y: rawY + (cy - rawY) * t, snappedTo: nearest };
   }
   return { x: rawX, y: rawY, snappedTo: null };
@@ -141,6 +142,45 @@ export default function App() {
     B: { loaded: false, trackName: '', playing: false, pitch: 1.0, volume: 0.8, eqLow: 0, eqMid: 0, eqHigh: 0, filter: 20000, delay: 0 },
     crossfader: 0.5,
   });
+  const [mobileScale, setMobileScale] = useState(1);
+  const [isRotated, setIsRotated] = useState(false);
+  const isMobile = typeof window !== 'undefined' && window.innerWidth < 900;
+
+  useEffect(() => {
+    if (!isMobile) return;
+    const calcScale = () => {
+      const isPortrait = window.innerHeight > window.innerWidth;
+      const availW = isPortrait ? window.innerHeight : window.innerWidth;
+      const availH = isPortrait ? window.innerWidth : window.innerHeight;
+      const s = Math.min(availW / 1440, availH / 880) * 0.96;
+      setMobileScale(s);
+    };
+    calcScale();
+    window.addEventListener('resize', calcScale);
+    return () => window.removeEventListener('resize', calcScale);
+  }, [isMobile]);
+
+  // Add rotated class to #root only in portrait mode when warning is dismissed
+  useEffect(() => {
+    if (!isMobile || showMobileWarning) {
+      document.getElementById('root')?.classList.remove('rotated');
+      return;
+    }
+    const update = () => {
+      const isPortrait = window.innerHeight > window.innerWidth;
+      if (isPortrait) {
+        document.getElementById('root')?.classList.add('rotated');
+        setIsRotated(true);
+      } else {
+        document.getElementById('root')?.classList.remove('rotated');
+        setIsRotated(false);
+      }
+    };
+    update();
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
+  }, [isMobile, showMobileWarning]);
+
   const [handPositions, setHandPositions] = useState([]);
   const [hoveredControl, setHoveredControl] = useState(null);
   const [grabbedControl, setGrabbedControl] = useState(null);
@@ -171,6 +211,19 @@ export default function App() {
       engine.setDelayMix(deck, 0);
     });
     engine.setCrossfader(0.5);
+
+    // Load default tracks
+    const loadDefault = async (deck, url, name) => {
+      try {
+        const resp = await fetch(url);
+        const blob = await resp.blob();
+        const file = new File([blob], name, { type: 'audio/mpeg' });
+        await engine.loadTrack(deck, file);
+        setDjState((s) => ({ ...s, [deck]: { ...s[deck], loaded: true, trackName: name } }));
+      } catch (e) { /* silently fail if default tracks missing */ }
+    };
+    loadDefault('A', `${process.env.PUBLIC_URL}/house_1.mp3`, 'House Track 1');
+    loadDefault('B', `${process.env.PUBLIC_URL}/house_2.mp3`, 'House Track 2');
   }, []);
   const waveformCanvasA = useRef(null);
   const waveformCanvasB = useRef(null);
@@ -238,7 +291,7 @@ export default function App() {
       const isGrabbing = hand.pinching && interaction.grabbed;
       let cursorX, cursorY, snapInfo;
       if (isGrabbing) { cursorX = hand.x; cursorY = hand.y; snapInfo = { snappedTo: interaction.grabbed }; }
-      else { snapInfo = magneticSnap(hand.x, hand.y); cursorX = snapInfo.x; cursorY = snapInfo.y; }
+      else { snapInfo = magneticSnap(hand.x, hand.y, mobileScale); cursorX = snapInfo.x; cursorY = snapInfo.y; }
       displayPositions.push({ x: cursorX, y: cursorY, pinching: hand.pinching, snapped: snapInfo.snappedTo !== null && !isGrabbing });
       if (snapInfo.snappedTo) newSnapped = snapInfo.snappedTo;
       const el = document.elementFromPoint(cursorX, cursorY);
@@ -275,7 +328,7 @@ export default function App() {
         const cid = interaction.grabbed;
         const def = CONTROL_DEFS[cid];
         const cel = document.querySelector(`[data-control="${cid}"]`);
-        if (cel) { const r = cel.getBoundingClientRect(); if (Math.hypot(hand.x - (r.left+r.width/2), hand.y - (r.top+r.height/2)) > MAX_DRAG_DIST) { interaction.grabbed = null; return; } }
+        if (cel) { const r = cel.getBoundingClientRect(); if (Math.hypot(hand.x - (r.left+r.width/2), hand.y - (r.top+r.height/2)) > MAX_DRAG_DIST / mobileScale) { interaction.grabbed = null; return; } }
         newGrabbed = cid;
         if (def) {
           const rawDx = hand.x - interaction.lastX;
@@ -486,7 +539,7 @@ export default function App() {
           </div>
           <label className="load-btn">
             LOAD
-            <input type="file" accept="audio/*" onChange={(e) => { const f = e.target.files?.[0]; if (f) loadTrack(deckId, f); }} />
+            <input type="file" accept=".mp3,audio/mpeg" onChange={(e) => { const f = e.target.files?.[0]; if (f) loadTrack(deckId, f); }} />
           </label>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -592,34 +645,37 @@ export default function App() {
       <img src={`${process.env.PUBLIC_URL}/maestro-logo.png`} alt="Maestro" className="page-logo" />
       <span className="page-title-sub">NO HARDWARE &middot; NO TOUCH &middot; JUST GESTURES</span>
     </div>
-    <div className="controller fade-in">
-      {showOnboarding && (
-        <div className="onboarding-overlay" onClick={dismissOnboarding}>
-          <div className="onboarding-modal" onClick={(e) => e.stopPropagation()}>
-            <h2 className="onboarding-title">HOW TO USE</h2>
-            <div className="onboarding-steps">
-              <div className="onboarding-step">
-                <svg className="onboarding-icon" viewBox="0 0 48 48" fill="none" stroke="rgba(232,130,12,0.7)" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
-                  {/* Palm */}
-                  <path d="M24 38v-4c0-1 0-2-1-3l-3-4" />
-                  <path d="M20 27v-12c0-1.8 1.2-3 2.5-3s2.5 1.2 2.5 3v10" fill="rgba(232,130,12,0.08)" />
-                  {/* Index finger */}
-                  <path d="M25 15v-5c0-1.8 1.2-3 2.5-3s2.5 1.2 2.5 3v10" fill="rgba(232,130,12,0.08)" />
-                  {/* Ring finger */}
-                  <path d="M30 17v-4.5c0-1.8 1.2-3 2.5-3s2.5 1.2 2.5 3V23" fill="rgba(232,130,12,0.08)" />
-                  {/* Pinky */}
-                  <path d="M35 23v-6c0-1.8 1-2.5 2-2.5s2 .7 2 2.5v8c0 7-4 13-11 15" fill="rgba(232,130,12,0.08)" />
-                  {/* Thumb */}
-                  <path d="M20 21h-3c-1.8 0-3 1-3 2.2s1.2 2.3 3 2.3h3" fill="rgba(232,130,12,0.08)" />
-                  {/* Cursor dot */}
-                  <circle cx="27.5" cy="6" r="2" fill="rgba(232,130,12,0.5)" stroke="none" />
-                  <circle cx="27.5" cy="6" r="4" fill="none" stroke="rgba(232,130,12,0.2)" strokeWidth="0.8" />
-                </svg>
-                <div>
-                  <strong>SHOW YOUR HAND</strong>
-                  <p>Hold your hand up in front of the webcam. A cursor will follow your index finger.</p>
-                </div>
+    <HandTracker onHandData={handleHandData} rotated={isRotated} mobileScale={mobileScale} />
+    {handPositions.map((h, i) => (
+      <div key={i} className={`hand-cursor ${h.pinching ? 'pinched' : 'open'}${h.snapped ? ' snapped' : ''}`} style={{ left: h.x, top: h.y }} />
+    ))}
+    {showOnboarding && (
+      <div className="onboarding-overlay" onClick={dismissOnboarding}>
+        <div className="onboarding-modal" onClick={(e) => e.stopPropagation()}>
+          <h2 className="onboarding-title">HOW TO USE</h2>
+          <div className="onboarding-steps">
+            <div className="onboarding-step">
+              <svg className="onboarding-icon" viewBox="0 0 48 48" fill="none" stroke="rgba(232,130,12,0.7)" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+                {/* Palm */}
+                <path d="M24 38v-4c0-1 0-2-1-3l-3-4" />
+                <path d="M20 27v-12c0-1.8 1.2-3 2.5-3s2.5 1.2 2.5 3v10" fill="rgba(232,130,12,0.08)" />
+                {/* Index finger */}
+                <path d="M25 15v-5c0-1.8 1.2-3 2.5-3s2.5 1.2 2.5 3v10" fill="rgba(232,130,12,0.08)" />
+                {/* Ring finger */}
+                <path d="M30 17v-4.5c0-1.8 1.2-3 2.5-3s2.5 1.2 2.5 3V23" fill="rgba(232,130,12,0.08)" />
+                {/* Pinky */}
+                <path d="M35 23v-6c0-1.8 1-2.5 2-2.5s2 .7 2 2.5v8c0 7-4 13-11 15" fill="rgba(232,130,12,0.08)" />
+                {/* Thumb */}
+                <path d="M20 21h-3c-1.8 0-3 1-3 2.2s1.2 2.3 3 2.3h3" fill="rgba(232,130,12,0.08)" />
+                {/* Cursor dot */}
+                <circle cx="27.5" cy="6" r="2" fill="rgba(232,130,12,0.5)" stroke="none" />
+                <circle cx="27.5" cy="6" r="4" fill="none" stroke="rgba(232,130,12,0.2)" strokeWidth="0.8" />
+              </svg>
+              <div>
+                <strong>SHOW YOUR HAND</strong>
+                <p>Hold your hand up in front of the webcam. A cursor will follow your index finger.</p>
               </div>
+            </div>
               <div className="onboarding-step">
                 <svg className="onboarding-icon" viewBox="0 0 48 48" fill="none" stroke="rgba(232,130,12,0.7)" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
                   {/* Thumb coming from left */}
@@ -689,16 +745,12 @@ export default function App() {
                 </div>
               </div>
             </div>
-            <p className="onboarding-disclaimer">This project is still in active development. Some features may not work as expected.</p>
-            <button className="onboarding-close-btn" onClick={dismissOnboarding}>GOT IT</button>
-          </div>
+          <p className="onboarding-disclaimer">This project is still in active development. Some features may not work as expected.</p>
+          <button className="onboarding-close-btn" onClick={dismissOnboarding}>GOT IT</button>
         </div>
-      )}
-      <HandTracker onHandData={handleHandData} />
-      {handPositions.map((h, i) => (
-        <div key={i} className={`hand-cursor ${h.pinching ? 'pinched' : 'open'}${h.snapped ? ' snapped' : ''}`} style={{ left: h.x, top: h.y }} />
-      ))}
-
+      </div>
+    )}
+    <div className="controller fade-in" style={isMobile ? { transform: `scale(${mobileScale})` } : undefined}>
       <div className="ctrl-header">
         <div className="brand">
           <img src={`${process.env.PUBLIC_URL}/maestro-logo.png`} alt="Maestro" className="brand-logo" />
