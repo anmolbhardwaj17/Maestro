@@ -212,7 +212,7 @@ export default function App() {
     });
     engine.setCrossfader(0.5);
 
-    // Load default tracks
+    // Load default tracks on mount
     const loadDefault = async (deck, url, name) => {
       try {
         const resp = await fetch(url);

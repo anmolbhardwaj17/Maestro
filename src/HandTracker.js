@@ -154,7 +154,7 @@ export default function HandTracker({ onHandData, rotated, mobileScale }) {
             ctx.beginPath();
             ctx.moveTo(pts[f[0]].x, pts[f[0]].y);
             f.forEach((fi) => ctx.lineTo(pts[fi].x, pts[fi].y));
-            ctx.lineWidth = isPinched ? 16 : 20;
+            ctx.lineWidth = isPinched ? 22 : 28;
             ctx.lineCap = 'round'; ctx.lineJoin = 'round';
             ctx.strokeStyle = isPinched ? 'rgba(232,100,12,0.12)' : 'rgba(100,100,100,0.12)';
             ctx.stroke();
