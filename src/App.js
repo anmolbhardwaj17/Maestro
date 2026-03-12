@@ -142,9 +142,15 @@ export default function App() {
     B: { loaded: false, trackName: '', playing: false, pitch: 1.0, volume: 0.8, eqLow: 0, eqMid: 0, eqHigh: 0, filter: 20000, delay: 0 },
     crossfader: 0.5,
   });
-  const [mobileScale, setMobileScale] = useState(1);
+  const isMobile = typeof window !== 'undefined' && (/Android|iPhone|iPad|iPod|webOS|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth < 900);
+  const [mobileScale, setMobileScale] = useState(() => {
+    if (!isMobile) return 1;
+    const isPortrait = window.innerHeight > window.innerWidth;
+    const availW = isPortrait ? window.innerHeight : window.innerWidth;
+    const availH = isPortrait ? window.innerWidth : window.innerHeight;
+    return Math.min(availW / 1440, availH / 880) * 0.96;
+  });
   const [isRotated, setIsRotated] = useState(false);
-  const isMobile = typeof window !== 'undefined' && window.innerWidth < 900;
 
   useEffect(() => {
     if (!isMobile) return;
@@ -750,7 +756,8 @@ export default function App() {
         </div>
       </div>
     )}
-    <div className="controller fade-in" style={isMobile ? { transform: `scale(${mobileScale})` } : undefined}>
+    <div className={isMobile ? 'mobile-scale-wrap' : undefined} style={isMobile ? { width: 1400 * mobileScale, height: 860 * mobileScale } : undefined}>
+    <div className="controller fade-in" style={isMobile ? { transform: `scale(${mobileScale})`, transformOrigin: 'top left' } : undefined}>
       <div className="ctrl-header">
         <div className="brand">
           <img src={`${process.env.PUBLIC_URL}/maestro-logo.png`} alt="Maestro" className="brand-logo" />
@@ -839,6 +846,7 @@ export default function App() {
 
         {renderDeck('B')}
       </div>
+    </div>
     </div>
     <a href="https://anmolbhardwaj.com" target="_blank" rel="noopener noreferrer" className="controller-tagline">ANMOLBHARDWAJ.COM</a>
     </div>
