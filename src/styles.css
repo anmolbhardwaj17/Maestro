@@ -1373,6 +1373,10 @@ body {
     border-radius: 4px;
   }
 
+  #root.rotated .webcam-preview {
+    transform: scaleX(-1) rotate(90deg);
+  }
+
   .onboarding-overlay {
     position: fixed;
     inset: 0;

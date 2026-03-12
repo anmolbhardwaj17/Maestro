@@ -109,19 +109,31 @@ const CONTROL_DEFS = {
   crossfader:  { min: 0, max: 1, sens: 0.006, type: 'slider', horizontal: true },
 };
 
-function magneticSnap(rawX, rawY, scale = 1) {
+// Convert viewport coords to rotated container coords
+function fromViewport(vx, vy, isRotated) {
+  if (!isRotated) return { x: vx, y: vy };
+  // Use root element's actual layout width (= CSS 100dvh) instead of window.innerHeight
+  // These can differ on mobile Safari due to address bar, safe areas, bottom nav
+  const root = document.getElementById('root');
+  const containerW = root ? root.offsetWidth : window.innerHeight;
+  return { x: containerW - vy, y: vx };
+}
+
+function magneticSnap(rawX, rawY, scale = 1, isRotated = false) {
   const radius = SNAP_RADIUS / scale;
   const controls = document.querySelectorAll('[data-control]');
-  let nearest = null, nearestDist = Infinity, cx = rawX, cy = rawY;
+  let nearest = null, nearestDist = Infinity, ncx = rawX, ncy = rawY;
   controls.forEach((el) => {
     const r = el.getBoundingClientRect();
-    const ecx = r.left + r.width / 2, ecy = r.top + r.height / 2;
+    const viewCx = r.left + r.width / 2, viewCy = r.top + r.height / 2;
+    // Convert bounding rect center from viewport to container space
+    const { x: ecx, y: ecy } = fromViewport(viewCx, viewCy, isRotated);
     const d = Math.hypot(rawX - ecx, rawY - ecy);
-    if (d < nearestDist) { nearestDist = d; nearest = el.dataset.control; cx = ecx; cy = ecy; }
+    if (d < nearestDist) { nearestDist = d; nearest = el.dataset.control; ncx = ecx; ncy = ecy; }
   });
   if (nearest && nearestDist < radius) {
     const t = SNAP_STRENGTH * (1 - nearestDist / radius);
-    return { x: rawX + (cx - rawX) * t, y: rawY + (cy - rawY) * t, snappedTo: nearest };
+    return { x: rawX + (ncx - rawX) * t, y: rawY + (ncy - rawY) * t, snappedTo: nearest };
   }
   return { x: rawX, y: rawY, snappedTo: null };
 }
@@ -233,6 +245,19 @@ export default function App() {
     };
     loadDefault('A', `${process.env.PUBLIC_URL}/house_1.mp3`, 'House Track 1');
     loadDefault('B', `${process.env.PUBLIC_URL}/house_2.mp3`, 'House Track 2');
+
+    // Resume AudioContext on first user gesture (required on mobile)
+    const resumeAudio = () => {
+      if (engine.ctx?.state === 'suspended') engine.ctx.resume();
+      document.removeEventListener('touchstart', resumeAudio);
+      document.removeEventListener('click', resumeAudio);
+    };
+    document.addEventListener('touchstart', resumeAudio, { once: true });
+    document.addEventListener('click', resumeAudio, { once: true });
+    return () => {
+      document.removeEventListener('touchstart', resumeAudio);
+      document.removeEventListener('click', resumeAudio);
+    };
   }, []);
   const waveformCanvasA = useRef(null);
   const waveformCanvasB = useRef(null);
@@ -300,12 +325,15 @@ export default function App() {
       const isGrabbing = hand.pinching && interaction.grabbed;
       let cursorX, cursorY, snapInfo;
       if (isGrabbing) { cursorX = hand.x; cursorY = hand.y; snapInfo = { snappedTo: interaction.grabbed }; }
-      else { snapInfo = magneticSnap(hand.x, hand.y, mobileScale); cursorX = snapInfo.x; cursorY = snapInfo.y; }
+      else { snapInfo = magneticSnap(hand.x, hand.y, mobileScale, isRotated); cursorX = snapInfo.x; cursorY = snapInfo.y; }
       displayPositions.push({ x: cursorX, y: cursorY, pinching: hand.pinching, snapped: snapInfo.snappedTo !== null && !isGrabbing });
       if (snapInfo.snappedTo) newSnapped = snapInfo.snappedTo;
-      const el = document.elementFromPoint(cursorX, cursorY);
-      const controlEl = el?.closest('[data-control]');
-      const controlId = controlEl?.dataset?.control || snapInfo.snappedTo;
+      let controlId = snapInfo.snappedTo;
+      if (!isRotated) {
+        const el = document.elementFromPoint(cursorX, cursorY);
+        const controlEl = el?.closest('[data-control]');
+        controlId = controlEl?.dataset?.control || snapInfo.snappedTo;
+      }
       if (controlId) newHovered = controlId;
       if (hand.justPinched) {
         interaction.pinchStartTime = performance.now();
@@ -327,7 +355,12 @@ export default function App() {
         const dt = performance.now() - interaction.pinchStartTime;
         const dist = Math.hypot(hand.x - interaction.pinchStartPos.x, hand.y - interaction.pinchStartPos.y);
         if (dt < TAP_MAX_DURATION && dist < TAP_MAX_MOVE) {
-          const padEl = document.elementFromPoint(hand.x, hand.y)?.closest('[data-control^="pad-"]');
+          let padEl = null;
+          if (isRotated) {
+            if (controlId?.startsWith('pad-')) padEl = { dataset: { control: controlId } };
+          } else {
+            padEl = document.elementFromPoint(hand.x, hand.y)?.closest('[data-control^="pad-"]');
+          }
           if (padEl && !controlId?.startsWith('pad-')) {
             triggerPad(padEl.dataset.control.replace('pad-', ''));
           }
@@ -337,7 +370,7 @@ export default function App() {
         const cid = interaction.grabbed;
         const def = CONTROL_DEFS[cid];
         const cel = document.querySelector(`[data-control="${cid}"]`);
-        if (cel) { const r = cel.getBoundingClientRect(); if (Math.hypot(hand.x - (r.left+r.width/2), hand.y - (r.top+r.height/2)) > MAX_DRAG_DIST / mobileScale) { interaction.grabbed = null; return; } }
+        if (cel) { const r = cel.getBoundingClientRect(); const { x: ecx, y: ecy } = fromViewport(r.left+r.width/2, r.top+r.height/2, isRotated); if (Math.hypot(hand.x - ecx, hand.y - ecy) > MAX_DRAG_DIST / mobileScale) { interaction.grabbed = null; return; } }
         newGrabbed = cid;
         if (def) {
           const rawDx = hand.x - interaction.lastX;
@@ -365,7 +398,7 @@ export default function App() {
     });
     for (let i = handsData.length; i < 2; i++) interactionRef.current[i].grabbed = null;
     setHandPositions(displayPositions); setHoveredControl(newHovered); setGrabbedControl(newGrabbed); setSnappedControl(newSnapped);
-  }, [getControlValue, applyControl, togglePlay, triggerPad, mobileScale]);
+  }, [getControlValue, applyControl, togglePlay, triggerPad, mobileScale, isRotated]);
 
   const mouseInteraction = useRef({ active: false, controlId: null, startY: 0, startX: 0, startValue: 0 });
   const handleMouseDown = useCallback((controlId) => (e) => {
@@ -615,6 +648,8 @@ export default function App() {
   };
 
   const dismissOnboarding = useCallback(() => {
+    engine.init();
+    if (engine.ctx?.state === 'suspended') engine.ctx.resume();
     setShowOnboarding(false);
     localStorage.setItem('maestro-onboarding-seen', Date.now().toString());
   }, []);
@@ -642,7 +677,7 @@ export default function App() {
           <img src={`${process.env.PUBLIC_URL}/maestro-logo.png`} alt="Maestro" className="mobile-logo" />
           <p className="mobile-text">WORKS BEST ON DESKTOP</p>
           <p className="mobile-sub">Maestro requires a webcam and a larger screen for the best gesture control experience.</p>
-          <button className="mobile-btn" onClick={() => setShowMobileWarning(false)}>CONTINUE ANYWAY</button>
+          <button className="mobile-btn" onClick={() => { engine.init(); if (engine.ctx?.state === 'suspended') engine.ctx.resume(); setShowMobileWarning(false); }}>CONTINUE ANYWAY</button>
         </div>
       </div>
     );

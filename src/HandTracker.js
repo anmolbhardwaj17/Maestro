@@ -25,6 +25,7 @@ export default function HandTracker({ onHandData, rotated, mobileScale }) {
   const landmarkerRef = useRef(null);
   const rafRef = useRef(null);
   const lastTimeRef = useRef(-1);
+  const detectFnRef = useRef(null);
 
   useEffect(() => { callbackRef.current = onHandData; }, [onHandData]);
   useEffect(() => { rotatedRef.current = rotated; }, [rotated]);
@@ -55,6 +56,10 @@ export default function HandTracker({ onHandData, rotated, mobileScale }) {
       if (cancelled) return;
       landmarkerRef.current = handLandmarker;
 
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        console.warn('Camera requires HTTPS. mediaDevices not available.');
+        return;
+      }
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { width: 640, height: 480, facingMode: 'user' },
       });
@@ -76,16 +81,15 @@ export default function HandTracker({ onHandData, rotated, mobileScale }) {
         const canvas = canvasRef.current;
         if (!canvas) return;
         const ctx = canvas.getContext('2d');
-        // In rotated mode, the container is 100vh wide x 100vw tall
         const isRot = rotatedRef.current;
-        const screenW = isRot ? window.innerHeight : window.innerWidth;
-        const screenH = isRot ? window.innerWidth : window.innerHeight;
+        // Use root element's actual layout dimensions (matches CSS dvh/dvw)
+        // window.innerHeight can differ from 100dvh on mobile Safari due to browser chrome
+        const root = document.getElementById('root');
+        const screenW = isRot ? (root ? root.offsetWidth : window.innerHeight) : window.innerWidth;
+        const screenH = isRot ? (root ? root.offsetHeight : window.innerWidth) : window.innerHeight;
         canvas.width = screenW;
         canvas.height = screenH;
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-        const xRatio = screenW / video.videoWidth;
-        const yRatio = screenH / video.videoHeight;
+        ctx.clearRect(0, 0, screenW, screenH);
 
         if (!results.landmarks || results.landmarks.length === 0) {
           smoothRef.current[0].initialized = false;
@@ -101,8 +105,13 @@ export default function HandTracker({ onHandData, rotated, mobileScale }) {
           const indexTip = landmarks[8];
           const thumbTip = landmarks[4];
 
-          const rawX = (1 - indexTip.x) * video.videoWidth * xRatio;
-          const rawY = indexTip.y * video.videoHeight * yRatio;
+          // When rotated, camera is portrait but UI is landscape — swap axes
+          const rawX = isRot
+            ? indexTip.y * screenW
+            : (1 - indexTip.x) * screenW;
+          const rawY = isRot
+            ? indexTip.x * screenH
+            : indexTip.y * screenH;
 
           const sm = smoothRef.current[handIndex];
           if (!sm.initialized) { sm.x = rawX; sm.y = rawY; sm.initialized = true; }
@@ -113,14 +122,13 @@ export default function HandTracker({ onHandData, rotated, mobileScale }) {
           const isPinched = wasPinching ? pinchDistance < PINCH_OFF : pinchDistance < PINCH_ON;
           pinchStateRef.current[handIndex] = isPinched;
 
-          const pinchAngle = Math.atan2(
-            thumbTip.y - indexTip.y,
-            (1 - thumbTip.x) - (1 - indexTip.x)
-          );
+          const pinchAngle = isRot
+            ? Math.atan2(thumbTip.x - indexTip.x, (1 - thumbTip.y) - (1 - indexTip.y))
+            : Math.atan2(thumbTip.y - indexTip.y, (1 - thumbTip.x) - (1 - indexTip.x));
 
-          // On mobile, amplify coordinates from center so hand range covers full controller
+          // On mobile, amplify interaction coordinates from center
           const ms = mobileScaleRef.current;
-          const amp = ms < 1 ? 1 / ms : 1;
+          const amp = ms < 1 ? 1.15 / ms : 1;
           const cX = screenW / 2, cY = screenH / 2;
           const ampX = (x) => amp === 1 ? x : cX + (x - cX) * amp;
           const ampY = (y) => amp === 1 ? y : cY + (y - cY) * amp;
@@ -133,11 +141,17 @@ export default function HandTracker({ onHandData, rotated, mobileScale }) {
             pinchAngle,
           });
 
-          // Convert landmarks to screen coords (with mobile amplification)
-          const pts = landmarks.map((lm) => ({
-            x: ampX((1 - lm.x) * video.videoWidth * xRatio),
-            y: ampY(lm.y * video.videoHeight * yRatio),
-          }));
+          // Convert landmarks to screen coords — translate to amplified cursor position but keep natural hand size
+          // Use wrist (landmark 0) as anchor point
+          const wristNatX = isRot ? landmarks[0].y * screenW : (1 - landmarks[0].x) * screenW;
+          const wristNatY = isRot ? landmarks[0].x * screenH : landmarks[0].y * screenH;
+          const wristAmpX = ampX(wristNatX);
+          const wristAmpY = ampY(wristNatY);
+          const pts = landmarks.map((lm) => {
+            const natX = isRot ? lm.y * screenW : (1 - lm.x) * screenW;
+            const natY = isRot ? lm.x * screenH : lm.y * screenH;
+            return { x: natX - wristNatX + wristAmpX, y: natY - wristNatY + wristAmpY };
+          });
 
           // Draw semi-transparent hand silhouette
           const palmIndices = [0, 1, 5, 9, 13, 17];
@@ -178,13 +192,38 @@ export default function HandTracker({ onHandData, rotated, mobileScale }) {
         if (callbackRef.current) callbackRef.current(handsData);
       }
 
+      detectFnRef.current = detect;
       detect();
     }
 
     setup();
 
+    const handleVisibility = async () => {
+      if (document.hidden) {
+        if (rafRef.current) cancelAnimationFrame(rafRef.current);
+        if (video.srcObject) {
+          video.srcObject.getTracks().forEach(t => t.stop());
+          video.srcObject = null;
+        }
+      } else {
+        if (cancelled || !landmarkerRef.current) return;
+        try {
+          const newStream = await navigator.mediaDevices.getUserMedia({
+            video: { width: 640, height: 480, facingMode: 'user' },
+          });
+          if (cancelled) { newStream.getTracks().forEach(t => t.stop()); return; }
+          video.srcObject = newStream;
+          await video.play();
+          lastTimeRef.current = -1;
+          if (detectFnRef.current) detectFnRef.current();
+        } catch (e) { /* camera may not be available */ }
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+
     return () => {
       cancelled = true;
+      document.removeEventListener('visibilitychange', handleVisibility);
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       if (landmarkerRef.current) landmarkerRef.current.close();
       if (video.srcObject) {
