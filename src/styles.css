@@ -3,7 +3,7 @@
 /* ─── Splash Screen ─── */
 .splash-screen {
   width: 100vw;
-  height: 100vh;
+  height: 100dvh;
   position: relative;
   background: center center / cover no-repeat;
   display: flex;
@@ -124,14 +124,14 @@ body {
   background: #e2e2e2;
   color: #333;
   user-select: none;
-  height: 100vh;
+  height: 100dvh;
 }
 
 #root { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
 
 .controller-bg {
   width: 100vw;
-  height: 100vh;
+  height: 100dvh;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1227,7 +1227,7 @@ body {
 /* ─── Mobile Warning ─── */
 .mobile-overlay {
   width: 100vw;
-  height: 100vh;
+  height: 100dvh;
   background: #e2e2e2;
   display: flex;
   align-items: center;
@@ -1313,8 +1313,8 @@ body {
   body { overflow: hidden; }
 
   #root {
-    width: 100vw;
-    height: 100vh;
+    width: 100dvw;
+    height: 100dvh;
     position: fixed;
     top: 0;
     left: 0;
@@ -1322,12 +1322,12 @@ body {
   }
 
   #root.rotated {
-    width: 100vh;
-    height: 100vw;
+    width: 100dvh;
+    height: 100dvw;
     transform: rotate(90deg);
     transform-origin: center center;
-    top: calc((100vh - 100vw) / 2);
-    left: calc((100vw - 100vh) / 2);
+    top: calc((100dvh - 100dvw) / 2);
+    left: calc((100dvw - 100dvh) / 2);
   }
 
   .controller-bg {

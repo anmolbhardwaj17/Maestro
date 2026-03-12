@@ -145,9 +145,10 @@ export default function App() {
   const isMobile = typeof window !== 'undefined' && (/Android|iPhone|iPad|iPod|webOS|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth < 900);
   const [mobileScale, setMobileScale] = useState(() => {
     if (!isMobile) return 1;
-    const isPortrait = window.innerHeight > window.innerWidth;
-    const availW = isPortrait ? window.innerHeight : window.innerWidth;
-    const availH = isPortrait ? window.innerWidth : window.innerHeight;
+    const vp = window.visualViewport || { width: window.innerWidth, height: window.innerHeight };
+    const isPortrait = vp.height > vp.width;
+    const availW = isPortrait ? vp.height : vp.width;
+    const availH = isPortrait ? vp.width : vp.height;
     return Math.min(availW / 1440, availH / 880) * 0.96;
   });
   const [isRotated, setIsRotated] = useState(false);
@@ -155,15 +156,17 @@ export default function App() {
   useEffect(() => {
     if (!isMobile) return;
     const calcScale = () => {
-      const isPortrait = window.innerHeight > window.innerWidth;
-      const availW = isPortrait ? window.innerHeight : window.innerWidth;
-      const availH = isPortrait ? window.innerWidth : window.innerHeight;
+      const vp = window.visualViewport || { width: window.innerWidth, height: window.innerHeight };
+      const isPortrait = vp.height > vp.width;
+      const availW = isPortrait ? vp.height : vp.width;
+      const availH = isPortrait ? vp.width : vp.height;
       const s = Math.min(availW / 1440, availH / 880) * 0.96;
       setMobileScale(s);
     };
     calcScale();
     window.addEventListener('resize', calcScale);
-    return () => window.removeEventListener('resize', calcScale);
+    if (window.visualViewport) window.visualViewport.addEventListener('resize', calcScale);
+    return () => { window.removeEventListener('resize', calcScale); if (window.visualViewport) window.visualViewport.removeEventListener('resize', calcScale); };
   }, [isMobile]);
 
   // Add rotated class to #root only in portrait mode when warning is dismissed
