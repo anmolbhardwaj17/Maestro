@@ -356,7 +356,7 @@ export default function App() {
     });
     for (let i = handsData.length; i < 2; i++) interactionRef.current[i].grabbed = null;
     setHandPositions(displayPositions); setHoveredControl(newHovered); setGrabbedControl(newGrabbed); setSnappedControl(newSnapped);
-  }, [getControlValue, applyControl, togglePlay, triggerPad]);
+  }, [getControlValue, applyControl, togglePlay, triggerPad, mobileScale]);
 
   const mouseInteraction = useRef({ active: false, controlId: null, startY: 0, startX: 0, startValue: 0 });
   const handleMouseDown = useCallback((controlId) => (e) => {
