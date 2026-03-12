@@ -168,7 +168,7 @@ export default function App() {
 
   // Add rotated class to #root only in portrait mode when warning is dismissed
   useEffect(() => {
-    if (!isMobile || showMobileWarning) {
+    if (!isMobile || showMobileWarning || showOnboarding) {
       document.getElementById('root')?.classList.remove('rotated');
       return;
     }
@@ -185,7 +185,7 @@ export default function App() {
     update();
     window.addEventListener('resize', update);
     return () => window.removeEventListener('resize', update);
-  }, [isMobile, showMobileWarning]);
+  }, [isMobile, showMobileWarning, showOnboarding]);
 
   const [handPositions, setHandPositions] = useState([]);
   const [hoveredControl, setHoveredControl] = useState(null);
