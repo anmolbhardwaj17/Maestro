@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { FilesetResolver, HandLandmarker } from '@mediapipe/tasks-vision';
 
-const SMOOTH_ALPHA = 0.45;
+const SMOOTH_ALPHA = 0.3;
 const PINCH_ON = 0.045;
 const PINCH_OFF = 0.075;
 
@@ -118,22 +118,45 @@ export default function HandTracker({ onHandData }) {
             pinchAngle,
           });
 
-          landmarks.forEach((lm) => {
-            const x = (1 - lm.x) * video.videoWidth * xRatio;
-            const y = lm.y * video.videoHeight * yRatio;
-            ctx.beginPath(); ctx.arc(x, y, 3, 0, 2 * Math.PI);
-            ctx.fillStyle = isPinched ? 'rgba(232,130,12,0.7)' : 'rgba(255,255,255,0.3)';
-            ctx.fill();
+          // Convert landmarks to screen coords
+          const pts = landmarks.map((lm) => ({
+            x: (1 - lm.x) * video.videoWidth * xRatio,
+            y: lm.y * video.videoHeight * yRatio,
+          }));
+
+          // Draw semi-transparent hand silhouette
+          const palmIndices = [0, 1, 5, 9, 13, 17];
+          ctx.beginPath();
+          ctx.moveTo(pts[palmIndices[0]].x, pts[palmIndices[0]].y);
+          palmIndices.forEach((pi) => ctx.lineTo(pts[pi].x, pts[pi].y));
+          ctx.closePath();
+          ctx.fillStyle = isPinched ? 'rgba(232,100,12,0.15)' : 'rgba(100,100,100,0.15)';
+          ctx.fill();
+
+          // Draw finger fills
+          const fingers = [[1,2,3,4],[5,6,7,8],[9,10,11,12],[13,14,15,16],[17,18,19,20]];
+          fingers.forEach((f) => {
+            ctx.beginPath();
+            ctx.moveTo(pts[f[0]].x, pts[f[0]].y);
+            f.forEach((fi) => ctx.lineTo(pts[fi].x, pts[fi].y));
+            ctx.lineWidth = isPinched ? 16 : 20;
+            ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+            ctx.strokeStyle = isPinched ? 'rgba(232,100,12,0.12)' : 'rgba(100,100,100,0.12)';
+            ctx.stroke();
           });
 
+          // Draw wireframe connections
           CONNECTIONS.forEach(([i, j]) => {
-            const xi = (1 - landmarks[i].x) * video.videoWidth * xRatio;
-            const yi = landmarks[i].y * video.videoHeight * yRatio;
-            const xj = (1 - landmarks[j].x) * video.videoWidth * xRatio;
-            const yj = landmarks[j].y * video.videoHeight * yRatio;
-            ctx.beginPath(); ctx.moveTo(xi, yi); ctx.lineTo(xj, yj);
-            ctx.strokeStyle = isPinched ? 'rgba(232,130,12,0.3)' : 'rgba(255,255,255,0.12)';
-            ctx.lineWidth = 1.5; ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(pts[i].x, pts[i].y); ctx.lineTo(pts[j].x, pts[j].y);
+            ctx.strokeStyle = isPinched ? 'rgba(232,100,12,0.35)' : 'rgba(140,140,140,0.2)';
+            ctx.lineWidth = 1.5; ctx.lineCap = 'round'; ctx.stroke();
+          });
+
+          // Draw landmark dots
+          pts.forEach((pt) => {
+            ctx.beginPath(); ctx.arc(pt.x, pt.y, 3, 0, 2 * Math.PI);
+            ctx.fillStyle = isPinched ? 'rgba(232,100,12,0.7)' : 'rgba(160,160,160,0.4)';
+            ctx.fill();
           });
         });
 

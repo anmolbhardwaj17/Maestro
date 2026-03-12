@@ -18,10 +18,43 @@ const TAP_MAX_DURATION = 300;
 const TAP_MAX_MOVE = 20;
 
 function formatTime(seconds) {
-  if (!seconds || !isFinite(seconds)) return '0:00';
+  if (!seconds || !isFinite(seconds)) return '00:00';
   const m = Math.floor(seconds / 60);
   const s = Math.floor(seconds % 60);
-  return `${m}:${s.toString().padStart(2, '0')}`;
+  return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+}
+
+const SEGMENTS = {
+  '0': [1,1,1,0,1,1,1], '1': [0,0,1,0,0,1,0], '2': [1,0,1,1,1,0,1],
+  '3': [1,0,1,1,0,1,1], '4': [0,1,1,1,0,1,0], '5': [1,1,0,1,0,1,1],
+  '6': [1,1,0,1,1,1,1], '7': [1,0,1,0,0,1,0], '8': [1,1,1,1,1,1,1],
+  '9': [1,1,1,1,0,1,1], ':': 'colon',
+};
+
+function SevenSegChar({ char }) {
+  const segs = SEGMENTS[char];
+  if (segs === 'colon') return <div className="seg-colon"><i /><i /></div>;
+  if (!segs) return null;
+  return (
+    <div className="seg-digit">
+      <i className={`seg seg-a${segs[0] ? ' on' : ''}`} />
+      <i className={`seg seg-b${segs[1] ? ' on' : ''}`} />
+      <i className={`seg seg-c${segs[2] ? ' on' : ''}`} />
+      <i className={`seg seg-d${segs[3] ? ' on' : ''}`} />
+      <i className={`seg seg-e${segs[4] ? ' on' : ''}`} />
+      <i className={`seg seg-f${segs[5] ? ' on' : ''}`} />
+      <i className={`seg seg-g${segs[6] ? ' on' : ''}`} />
+    </div>
+  );
+}
+
+function LedTime({ seconds }) {
+  const str = formatTime(seconds);
+  return (
+    <div className="led-time">
+      {str.split('').map((ch, i) => <SevenSegChar key={i} char={ch} />)}
+    </div>
+  );
 }
 
 function valueToPercent(value, min, max) {
@@ -59,21 +92,21 @@ function applyValueSnap(controlId, rawValue) {
 }
 
 const CONTROL_DEFS = {
-  'volume-A':  { min: 0, max: 1, sens: 0.004, type: 'slider' },
-  'volume-B':  { min: 0, max: 1, sens: 0.004, type: 'slider' },
-  'pitch-A':   { min: 0.5, max: 1.5, sens: 0.004, type: 'slider' },
-  'pitch-B':   { min: 0.5, max: 1.5, sens: 0.004, type: 'slider' },
-  'eq-low-A':  { min: -12, max: 12, sens: 0.1 },
-  'eq-mid-A':  { min: -12, max: 12, sens: 0.1 },
-  'eq-high-A': { min: -12, max: 12, sens: 0.1 },
-  'eq-low-B':  { min: -12, max: 12, sens: 0.1 },
-  'eq-mid-B':  { min: -12, max: 12, sens: 0.1 },
-  'eq-high-B': { min: -12, max: 12, sens: 0.1 },
-  'filter-A':  { min: 60, max: 20000, sens: 80 },
-  'filter-B':  { min: 60, max: 20000, sens: 80 },
-  'delay-A':   { min: 0, max: 1, sens: 0.004 },
-  'delay-B':   { min: 0, max: 1, sens: 0.004 },
-  crossfader:  { min: 0, max: 1, sens: 0.004, type: 'slider', horizontal: true },
+  'volume-A':  { min: 0, max: 1, sens: 0.006, type: 'slider' },
+  'volume-B':  { min: 0, max: 1, sens: 0.006, type: 'slider' },
+  'pitch-A':   { min: 0.5, max: 1.5, sens: 0.006, type: 'slider' },
+  'pitch-B':   { min: 0.5, max: 1.5, sens: 0.006, type: 'slider' },
+  'eq-low-A':  { min: -12, max: 12, sens: 0.15 },
+  'eq-mid-A':  { min: -12, max: 12, sens: 0.15 },
+  'eq-high-A': { min: -12, max: 12, sens: 0.15 },
+  'eq-low-B':  { min: -12, max: 12, sens: 0.15 },
+  'eq-mid-B':  { min: -12, max: 12, sens: 0.15 },
+  'eq-high-B': { min: -12, max: 12, sens: 0.15 },
+  'filter-A':  { min: 60, max: 20000, sens: 120 },
+  'filter-B':  { min: 60, max: 20000, sens: 120 },
+  'delay-A':   { min: 0, max: 1, sens: 0.006 },
+  'delay-B':   { min: 0, max: 1, sens: 0.006 },
+  crossfader:  { min: 0, max: 1, sens: 0.006, type: 'slider', horizontal: true },
 };
 
 function magneticSnap(rawX, rawY) {
@@ -93,9 +126,16 @@ function magneticSnap(rawX, rawY) {
 }
 
 export default function App() {
-  const [started, setStarted] = useState(false);
-  const [fadeOut, setFadeOut] = useState(false);
-  const [showOnboarding, setShowOnboarding] = useState(true);
+  const [showMobileWarning, setShowMobileWarning] = useState(() => {
+    return /Android|iPhone|iPad|iPod|webOS|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth < 900;
+  });
+  const [showOnboarding, setShowOnboarding] = useState(() => {
+    if (process.env.NODE_ENV === 'development') return true;
+    const lastSeen = localStorage.getItem('maestro-onboarding-seen');
+    if (!lastSeen) return true;
+    const daysSince = (Date.now() - parseInt(lastSeen, 10)) / (1000 * 60 * 60 * 24);
+    return daysSince >= 7;
+  });
   const [djState, setDjState] = useState({
     A: { loaded: false, trackName: '', playing: false, pitch: 1.0, volume: 0.8, eqLow: 0, eqMid: 0, eqHigh: 0, filter: 20000, delay: 0 },
     B: { loaded: false, trackName: '', playing: false, pitch: 1.0, volume: 0.8, eqLow: 0, eqMid: 0, eqHigh: 0, filter: 20000, delay: 0 },
@@ -109,13 +149,29 @@ export default function App() {
   const [jogAngles, setJogAngles] = useState({ A: 0, B: 0 });
   const [activePads, setActivePads] = useState({});
 
+  const DRAG_SMOOTH = 0.4;
   const interactionRef = useRef([
-    { grabbed: null, lastY: 0, lastX: 0, deadZonePassed: false, pinchStartTime: 0, pinchStartPos: { x: 0, y: 0 } },
-    { grabbed: null, lastY: 0, lastX: 0, deadZonePassed: false, pinchStartTime: 0, pinchStartPos: { x: 0, y: 0 } },
+    { grabbed: null, lastY: 0, lastX: 0, smoothDx: 0, smoothDy: 0, deadZonePassed: false, pinchStartTime: 0, pinchStartPos: { x: 0, y: 0 } },
+    { grabbed: null, lastY: 0, lastX: 0, smoothDx: 0, smoothDy: 0, deadZonePassed: false, pinchStartTime: 0, pinchStartPos: { x: 0, y: 0 } },
   ]);
   const padAudioCtxRef = useRef(null);
   const djStateRef = useRef(djState);
   useEffect(() => { djStateRef.current = djState; }, [djState]);
+
+  // Sync engine with default UI state on mount
+  useEffect(() => {
+    engine.init();
+    ['A', 'B'].forEach((deck) => {
+      engine.setVolume(deck, 0.8);
+      engine.setPitch(deck, 1.0);
+      engine.setEQ(deck, 'low', 0);
+      engine.setEQ(deck, 'mid', 0);
+      engine.setEQ(deck, 'high', 0);
+      engine.setFilter(deck, 20000);
+      engine.setDelayMix(deck, 0);
+    });
+    engine.setCrossfader(0.5);
+  }, []);
   const waveformCanvasA = useRef(null);
   const waveformCanvasB = useRef(null);
   const animFrameRef = useRef(null);
@@ -152,13 +208,14 @@ export default function App() {
     }
   }, []);
 
-  const triggerPad = useCallback((padIndex) => {
+  const triggerPad = useCallback((padKey) => {
     if (!padAudioCtxRef.current) padAudioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
     const ctx = padAudioCtxRef.current;
     if (ctx.state === 'suspended') ctx.resume();
-    PAD_SOUNDS[padIndex]?.play(ctx);
-    setActivePads((p) => ({ ...p, [padIndex]: true }));
-    setTimeout(() => setActivePads((p) => ({ ...p, [padIndex]: false })), 150);
+    const idx = parseInt(padKey.split('-').pop(), 10);
+    PAD_SOUNDS[idx]?.play(ctx);
+    setActivePads((p) => ({ ...p, [padKey]: true }));
+    setTimeout(() => setActivePads((p) => ({ ...p, [padKey]: false })), 150);
   }, []);
 
   const togglePlay = useCallback((deck) => { engine.init(); const p = engine.togglePlay(deck); setDjState((s) => ({ ...s, [deck]: { ...s[deck], playing: p } })); }, []);
@@ -194,7 +251,7 @@ export default function App() {
         if (controlId) {
           if (controlId.startsWith('play-')) { togglePlay(controlId.split('-')[1]); }
           else if (controlId.startsWith('pad-')) {
-            triggerPad(parseInt(controlId.split('-')[1], 10));
+            triggerPad(controlId.replace('pad-', ''));
           }
           else {
             interaction.grabbed = controlId;
@@ -210,7 +267,7 @@ export default function App() {
         if (dt < TAP_MAX_DURATION && dist < TAP_MAX_MOVE) {
           const padEl = document.elementFromPoint(hand.x, hand.y)?.closest('[data-control^="pad-"]');
           if (padEl && !controlId?.startsWith('pad-')) {
-            triggerPad(parseInt(padEl.dataset.control.split('-')[1], 10));
+            triggerPad(padEl.dataset.control.replace('pad-', ''));
           }
         }
         interaction.grabbed = null;
@@ -221,21 +278,25 @@ export default function App() {
         if (cel) { const r = cel.getBoundingClientRect(); if (Math.hypot(hand.x - (r.left+r.width/2), hand.y - (r.top+r.height/2)) > MAX_DRAG_DIST) { interaction.grabbed = null; return; } }
         newGrabbed = cid;
         if (def) {
-          const dx = hand.x - interaction.lastX;
-          const dy = interaction.lastY - hand.y;
+          const rawDx = hand.x - interaction.lastX;
+          const rawDy = interaction.lastY - hand.y;
+          interaction.smoothDx += DRAG_SMOOTH * (rawDx - interaction.smoothDx);
+          interaction.smoothDy += DRAG_SMOOTH * (rawDy - interaction.smoothDy);
           if (!interaction.deadZonePassed) {
-            const dist = def.horizontal ? Math.abs(dx) : Math.abs(dy);
+            const dist = def.horizontal ? Math.abs(rawDx) : Math.abs(rawDy);
             if (dist > DEAD_ZONE) {
               interaction.deadZonePassed = true;
               interaction.lastX = hand.x;
               interaction.lastY = hand.y;
+              interaction.smoothDx = 0;
+              interaction.smoothDy = 0;
             }
           } else {
-            const delta = def.horizontal ? dx : dy;
+            const delta = def.horizontal ? interaction.smoothDx : interaction.smoothDy;
             const curVal = getControlValue(cid);
             applyControl(cid, curVal + delta * def.sens);
-            interaction.lastX = hand.x;
-            interaction.lastY = hand.y;
+            interaction.lastX += interaction.smoothDx * (def.horizontal ? 1 : 0);
+            interaction.lastY -= interaction.smoothDy * (def.horizontal ? 0 : 1);
           }
         }
       } else if (!hand.pinching) { interaction.grabbed = null; }
@@ -248,7 +309,7 @@ export default function App() {
   const handleMouseDown = useCallback((controlId) => (e) => {
     e.preventDefault();
     if (controlId.startsWith('play-')) { togglePlay(controlId.split('-')[1]); return; }
-    if (controlId.startsWith('pad-')) { triggerPad(parseInt(controlId.split('-')[1], 10)); return; }
+    if (controlId.startsWith('pad-')) { triggerPad(controlId.replace('pad-', '')); return; }
     const def = CONTROL_DEFS[controlId]; if (!def) return;
     mouseInteraction.current = { active: true, controlId, startY: e.clientY, startX: e.clientX, startValue: getControlValue(controlId) };
     const onMove = (ev) => {
@@ -267,40 +328,100 @@ export default function App() {
     const w = canvas.width, h = canvas.height;
     ctx.clearRect(0, 0, w, h);
 
-    const peaks = engine.getWaveformPeaks(deckId);
-    const pos = engine.getPlaybackPosition(deckId);
-    if (peaks) {
-      const barW = w / peaks.length;
-      peaks.forEach((peak, i) => {
-        const x = i * barW, bh = peak * h * 0.7;
-        ctx.fillStyle = (i / peaks.length) < pos ? 'rgba(232,130,12,0.3)' : 'rgba(232,130,12,0.08)';
-        ctx.fillRect(x, (h - bh) / 2, barW - 1, bh);
-      });
-      ctx.beginPath(); ctx.moveTo(pos * w, 0); ctx.lineTo(pos * w, h);
-      ctx.strokeStyle = '#e8820c'; ctx.lineWidth = 2; ctx.stroke();
+    const dotSize = 2;
+    const dotGap = 5;
+    const cols = Math.floor(w / dotGap);
+    const rows = Math.floor(h / dotGap);
+
+    // Draw dim background grid
+    ctx.fillStyle = 'rgba(232,100,12,0.04)';
+    for (let col = 0; col < cols; col++) {
+      for (let row = 0; row < rows; row++) {
+        ctx.beginPath();
+        ctx.arc(col * dotGap + dotGap / 2, row * dotGap + dotGap / 2, dotSize * 0.4, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
 
     const freqData = engine.getFrequencyData(deckId);
+    const peaks = engine.getWaveformPeaks(deckId);
+    const pos = engine.getPlaybackPosition(deckId);
+
     if (freqData) {
-      const barCount = 48;
-      const step = Math.floor(freqData.length / barCount);
-      const bw = w / barCount;
-      const gap = 2;
-      for (let i = 0; i < barCount; i++) {
+      // Live frequency bars as dot matrix
+      const barCols = Math.min(cols, 64);
+      const step = Math.floor(freqData.length / barCols);
+      const colWidth = cols / barCols;
+      for (let i = 0; i < barCols; i++) {
         let sum = 0;
         for (let j = 0; j < step; j++) sum += freqData[i * step + j];
         const avg = sum / step / 255;
-        const barH = avg * h * 0.9;
-        const x = i * bw;
-        if (avg > 0.01) {
-          ctx.fillStyle = `rgba(232, 130, 12, ${0.4 + avg * 0.5})`;
-          ctx.fillRect(x + gap / 2, h - barH, bw - gap, barH);
-          if (barH > 3) {
-            ctx.fillStyle = `rgba(255, 170, 40, ${0.6 + avg * 0.4})`;
-            ctx.fillRect(x + gap / 2, h - barH, bw - gap, 2);
+        const litRows = Math.ceil(avg * rows * 0.95);
+        const startCol = Math.floor(i * colWidth);
+        const endCol = Math.floor((i + 1) * colWidth);
+        for (let col = startCol; col < endCol; col++) {
+          for (let row = 0; row < rows; row++) {
+            const fromBottom = rows - 1 - row;
+            if (fromBottom < litRows) {
+              const x = col * dotGap + dotGap / 2;
+              const y = row * dotGap + dotGap / 2;
+              const brightness = 0.5 + avg * 0.5;
+              ctx.beginPath(); ctx.arc(x, y, dotSize, 0, Math.PI * 2);
+              ctx.fillStyle = `rgba(232,100,12,${brightness})`;
+              ctx.fill();
+            }
           }
         }
       }
+      // Glow pass on top
+      ctx.globalCompositeOperation = 'lighter';
+      for (let i = 0; i < barCols; i++) {
+        let sum = 0;
+        for (let j = 0; j < step; j++) sum += freqData[i * step + j];
+        const avg = sum / step / 255;
+        if (avg < 0.05) continue;
+        const litRows = Math.ceil(avg * rows * 0.95);
+        const startCol = Math.floor(i * colWidth);
+        const endCol = Math.floor((i + 1) * colWidth);
+        for (let col = startCol; col < endCol; col++) {
+          for (let row = 0; row < rows; row++) {
+            const fromBottom = rows - 1 - row;
+            if (fromBottom < litRows) {
+              const x = col * dotGap + dotGap / 2;
+              const y = row * dotGap + dotGap / 2;
+              ctx.beginPath(); ctx.arc(x, y, dotSize * 1.5, 0, Math.PI * 2);
+              ctx.fillStyle = `rgba(232,100,12,${avg * 0.15})`;
+              ctx.fill();
+            }
+          }
+        }
+      }
+      ctx.globalCompositeOperation = 'source-over';
+    } else if (peaks) {
+      // Static waveform when not playing
+      const midRow = rows / 2;
+      for (let col = 0; col < cols; col++) {
+        const peakIdx = Math.floor((col / cols) * peaks.length);
+        const peak = peaks[peakIdx] || 0;
+        const litRows = Math.ceil(peak * rows * 0.8);
+        const isPast = (col / cols) < pos;
+        for (let row = 0; row < rows; row++) {
+          const distFromMid = Math.abs(row - midRow);
+          if (distFromMid < litRows / 2) {
+            const x = col * dotGap + dotGap / 2;
+            const y = row * dotGap + dotGap / 2;
+            ctx.beginPath(); ctx.arc(x, y, dotSize, 0, Math.PI * 2);
+            ctx.fillStyle = isPast ? 'rgba(232,100,12,0.8)' : 'rgba(232,100,12,0.15)';
+            ctx.fill();
+          }
+        }
+      }
+    }
+
+    // Playback position line
+    if (peaks && pos > 0) {
+      ctx.beginPath(); ctx.moveTo(pos * w, 0); ctx.lineTo(pos * w, h);
+      ctx.strokeStyle = 'rgba(232,100,12,0.9)'; ctx.lineWidth = 1.5; ctx.stroke();
     }
   }, []);
 
@@ -382,49 +503,59 @@ export default function App() {
             </div>
           </div>
 
+        </div>
+
+        <div className="tempo-time-row">
+          <div className="time-display">
+            <LedTime seconds={pos * dur} />
+            <span className="time-sep">/</span>
+            <LedTime seconds={dur} />
+          </div>
           <div className="tempo-wrap">
             <span className="tempo-label">TEMPO</span>
             <div className="fader-slot">
               <div className="fader-ticks">
-                {[...Array(11)].map((_, i) => <div className={`fader-tick${i === 5 ? ' tick-bold' : ''}`} key={i} />)}
+                {[...Array(9)].map((_, i) => <div className={`fader-tick${i === 4 ? ' tick-bold' : ''}`} key={i} />)}
               </div>
               <div className={`tempo-track${cc(`pitch-${deckId}`)}`} data-control={`pitch-${deckId}`} onMouseDown={handleMouseDown(`pitch-${deckId}`)}>
                 <div className="tempo-thumb" style={{ bottom: `${pitchPct}%` }} />
               </div>
               <div className="fader-ticks">
-                {[...Array(11)].map((_, i) => <div className={`fader-tick${i === 5 ? ' tick-bold' : ''}`} key={i} />)}
+                {[...Array(9)].map((_, i) => <div className={`fader-tick${i === 4 ? ' tick-bold' : ''}`} key={i} />)}
               </div>
             </div>
             <span className="tempo-val">{d.pitch.toFixed(2)}x</span>
           </div>
         </div>
 
-        <div className="transport">
-          <div className={`play-btn${d.playing ? ' playing' : ''}`} data-control={`play-${deckId}`} onMouseDown={handleMouseDown(`play-${deckId}`)}>
-            {d.playing ? '\u23F8' : '\u25B6'}
+        <div className="deck-bottom">
+          <div className="transport">
+            <div className={`play-btn${d.playing ? ' playing' : ''}`} data-control={`play-${deckId}`} onMouseDown={handleMouseDown(`play-${deckId}`)}>
+              {d.playing ? '\u23F8' : '\u25B6'}
+            </div>
           </div>
-          <div className={`led${d.playing ? ' on' : ''}`} />
-          <span className="time-display">{formatTime(pos * dur)} / {formatTime(dur)}</span>
-        </div>
 
-        <div className="pad-grid">
-          {PAD_SOUNDS.slice(deckId === 'A' ? 0 : 4, deckId === 'A' ? 4 : 8).map((pad, i) => {
-            const idx = deckId === 'A' ? i : i + 4;
-            return (
-              <div
-                key={idx}
-                className={`drum-pad${activePads[idx] ? ' pad-active' : ''}${cc(`pad-${idx}`)}`}
-                data-control={`pad-${idx}`}
-                onMouseDown={handleMouseDown(`pad-${idx}`)}
-              >
-                <span className="pad-name">{pad.name}</span>
-              </div>
-            );
-          })}
+          <div className="pad-grid">
+            {PAD_SOUNDS.map((pad, idx) => (
+                <div
+                  key={`${deckId}-${idx}`}
+                  className={`drum-pad${activePads[`${deckId}-${idx}`] ? ' pad-active' : ''}${cc(`pad-${deckId}-${idx}`)}`}
+                  data-control={`pad-${deckId}-${idx}`}
+                  onMouseDown={handleMouseDown(`pad-${deckId}-${idx}`)}
+                >
+                  <span className="pad-name">{pad.name}</span>
+                </div>
+            ))}
+          </div>
         </div>
       </div>
     );
   };
+
+  const dismissOnboarding = useCallback(() => {
+    setShowOnboarding(false);
+    localStorage.setItem('maestro-onboarding-seen', Date.now().toString());
+  }, []);
 
   const renderMeter = (deckId) => {
     const freqData = engine.getFrequencyData(deckId);
@@ -442,43 +573,47 @@ export default function App() {
     );
   };
 
-  const handleStart = () => {
-    setFadeOut(true);
-    setTimeout(() => setStarted(true), 600);
-  };
-
-  if (!started) {
+  if (showMobileWarning) {
     return (
-      <div className={`splash-screen${fadeOut ? ' fade-out' : ''}`} style={{ backgroundImage: `url(${process.env.PUBLIC_URL}/splash-bg.png)` }}>
-        <div className="splash-overlay" />
-        <a href="https://anmolbhardwaj.com" target="_blank" rel="noopener noreferrer" className="splash-top-link">ANMOLBHARDWAJ.COM</a>
-        <div className="splash-content">
-          <img src={`${process.env.PUBLIC_URL}/maestro-logo.png`} alt="Maestro" className="splash-logo" />
-          <button className="splash-start-btn" onClick={handleStart}>
-            START MIXING
-          </button>
+      <div className="mobile-overlay">
+        <div className="mobile-modal">
+          <img src={`${process.env.PUBLIC_URL}/maestro-logo.png`} alt="Maestro" className="mobile-logo" />
+          <p className="mobile-text">WORKS BEST ON DESKTOP</p>
+          <p className="mobile-sub">Maestro requires a webcam and a larger screen for the best gesture control experience.</p>
+          <button className="mobile-btn" onClick={() => setShowMobileWarning(false)}>CONTINUE ANYWAY</button>
         </div>
-        <p className="splash-tagline">NO HARDWARE. NO TOUCH. JUST GESTURES.</p>
       </div>
     );
   }
 
   return (
-    <div className="controller-bg" style={{ backgroundImage: `url(${process.env.PUBLIC_URL}/splash-bg.png)` }}>
+    <div className="controller-bg">
+    <div className="page-title">
+      <img src={`${process.env.PUBLIC_URL}/maestro-logo.png`} alt="Maestro" className="page-logo" />
+      <span className="page-title-sub">NO HARDWARE &middot; NO TOUCH &middot; JUST GESTURES</span>
+    </div>
     <div className="controller fade-in">
       {showOnboarding && (
-        <div className="onboarding-overlay" onClick={() => setShowOnboarding(false)}>
+        <div className="onboarding-overlay" onClick={dismissOnboarding}>
           <div className="onboarding-modal" onClick={(e) => e.stopPropagation()}>
             <h2 className="onboarding-title">HOW TO USE</h2>
             <div className="onboarding-steps">
               <div className="onboarding-step">
-                <svg className="onboarding-icon" viewBox="0 0 40 40" fill="none" stroke="rgba(232,130,12,0.7)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M20 36v-8M20 28c-2 0-3.5-1.5-3.5-3.5V14c0-1.5 1.5-3 3.5-3s3.5 1.5 3.5 3v10.5c0 2-1.5 3.5-3.5 3.5z"/>
-                  <path d="M13.5 22V17c0-1.5 1.2-2.5 2.5-2.5s2.5 1 2.5 2.5"/>
-                  <path d="M23.5 16.5V17c0-1.5 1.2-2.5 2.5-2.5s2.5 1 2.5 2.5v5"/>
-                  <path d="M28.5 22v-3c0-1.5 1-2.5 2-2.5s2 1 2 2.5v5c0 6-4 12-12.5 12"/>
-                  <path d="M7.5 22v-5c0-1.5 1-2.5 2.2-2.5s2.3 1 2.3 2.5"/>
-                  <circle cx="20" cy="8" r="1.5" fill="rgba(232,130,12,0.4)" stroke="none"/>
+                <svg className="onboarding-icon" viewBox="0 0 48 48" fill="none" stroke="rgba(232,130,12,0.7)" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+                  {/* Palm */}
+                  <path d="M24 38v-4c0-1 0-2-1-3l-3-4" />
+                  <path d="M20 27v-12c0-1.8 1.2-3 2.5-3s2.5 1.2 2.5 3v10" fill="rgba(232,130,12,0.08)" />
+                  {/* Index finger */}
+                  <path d="M25 15v-5c0-1.8 1.2-3 2.5-3s2.5 1.2 2.5 3v10" fill="rgba(232,130,12,0.08)" />
+                  {/* Ring finger */}
+                  <path d="M30 17v-4.5c0-1.8 1.2-3 2.5-3s2.5 1.2 2.5 3V23" fill="rgba(232,130,12,0.08)" />
+                  {/* Pinky */}
+                  <path d="M35 23v-6c0-1.8 1-2.5 2-2.5s2 .7 2 2.5v8c0 7-4 13-11 15" fill="rgba(232,130,12,0.08)" />
+                  {/* Thumb */}
+                  <path d="M20 21h-3c-1.8 0-3 1-3 2.2s1.2 2.3 3 2.3h3" fill="rgba(232,130,12,0.08)" />
+                  {/* Cursor dot */}
+                  <circle cx="27.5" cy="6" r="2" fill="rgba(232,130,12,0.5)" stroke="none" />
+                  <circle cx="27.5" cy="6" r="4" fill="none" stroke="rgba(232,130,12,0.2)" strokeWidth="0.8" />
                 </svg>
                 <div>
                   <strong>SHOW YOUR HAND</strong>
@@ -486,14 +621,20 @@ export default function App() {
                 </div>
               </div>
               <div className="onboarding-step">
-                <svg className="onboarding-icon" viewBox="0 0 40 40" fill="none" stroke="rgba(232,130,12,0.7)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M16 20c0-2 1.5-3.5 3.5-3.5"/>
-                  <path d="M24 20c0-2-1.5-3.5-3.5-3.5"/>
-                  <path d="M16 20v6c0 3 2 5 4 5s4-2 4-5v-6"/>
-                  <path d="M13 18l3 2M27 18l-3 2"/>
-                  <path d="M16 14l1-3M24 14l-1-3"/>
-                  <circle cx="20" cy="16.5" r="2" fill="rgba(232,130,12,0.3)" stroke="rgba(232,130,12,0.7)"/>
-                  <path d="M18 16.5h4" strokeDasharray="1 1.5"/>
+                <svg className="onboarding-icon" viewBox="0 0 48 48" fill="none" stroke="rgba(232,130,12,0.7)" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+                  {/* Thumb coming from left */}
+                  <path d="M10 22c0-1.5 1.5-3 3-3h5v6h-5c-1.5 0-3-1.5-3-3z" fill="rgba(232,130,12,0.08)" />
+                  {/* Index finger coming from right, tips touching */}
+                  <path d="M25 16v-6c0-1.8 1.2-3 2.5-3s2.5 1.2 2.5 3v12" fill="rgba(232,130,12,0.08)" />
+                  {/* Middle finger */}
+                  <path d="M30 22v-10c0-1.8 1.2-3 2.5-3s2.5 1.2 2.5 3v12" fill="rgba(232,130,12,0.08)" />
+                  {/* Ring + pinky curled */}
+                  <path d="M35 24v-5c0-1.5 1-2.5 2-2.5s2 1 2 2.5v6c0 7-4 12-11 14" fill="rgba(232,130,12,0.08)" />
+                  {/* Palm body */}
+                  <path d="M18 19v8c0 5 3 9 8 11" fill="rgba(232,130,12,0.05)" />
+                  {/* Pinch point glow */}
+                  <circle cx="21" cy="19" r="3" fill="rgba(232,130,12,0.15)" stroke="rgba(232,130,12,0.8)" strokeWidth="1.5" />
+                  <circle cx="21" cy="19" r="5.5" fill="none" stroke="rgba(232,130,12,0.15)" strokeWidth="0.8" />
                 </svg>
                 <div>
                   <strong>PINCH TO GRAB</strong>
@@ -501,14 +642,20 @@ export default function App() {
                 </div>
               </div>
               <div className="onboarding-step">
-                <svg className="onboarding-icon" viewBox="0 0 40 40" fill="none" stroke="rgba(232,130,12,0.7)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M20 8v24"/>
-                  <path d="M15 12l5-4 5 4"/>
-                  <path d="M15 28l5 4 5-4"/>
-                  <rect x="12" y="17" width="16" height="6" rx="2" fill="rgba(232,130,12,0.1)" stroke="rgba(232,130,12,0.5)"/>
-                  <line x1="17" y1="19" x2="17" y2="21" strokeWidth="1"/>
-                  <line x1="20" y1="19" x2="20" y2="21" strokeWidth="1"/>
-                  <line x1="23" y1="19" x2="23" y2="21" strokeWidth="1"/>
+                <svg className="onboarding-icon" viewBox="0 0 48 48" fill="none" stroke="rgba(232,130,12,0.7)" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+                  {/* Fader track */}
+                  <rect x="22" y="6" width="4" height="36" rx="2" fill="rgba(232,130,12,0.06)" stroke="rgba(232,130,12,0.3)" />
+                  {/* Fader knob */}
+                  <rect x="18" y="18" width="12" height="6" rx="2" fill="rgba(232,130,12,0.15)" stroke="rgba(232,130,12,0.7)" strokeWidth="1.5" />
+                  <line x1="22" y1="20" x2="22" y2="22" strokeWidth="0.8" />
+                  <line x1="24" y1="20" x2="24" y2="22" stroke="rgba(232,130,12,0.9)" strokeWidth="1" />
+                  <line x1="26" y1="20" x2="26" y2="22" strokeWidth="0.8" />
+                  {/* Up arrow */}
+                  <path d="M10 16l4-5 4 5" strokeWidth="1.5" />
+                  <line x1="14" y1="11" x2="14" y2="21" strokeWidth="1" strokeDasharray="2 2" />
+                  {/* Down arrow */}
+                  <path d="M34 28l4 5 4-5" strokeWidth="1.5" />
+                  <line x1="38" y1="33" x2="38" y2="23" strokeWidth="1" strokeDasharray="2 2" />
                 </svg>
                 <div>
                   <strong>DRAG TO ADJUST</strong>
@@ -516,12 +663,25 @@ export default function App() {
                 </div>
               </div>
               <div className="onboarding-step">
-                <svg className="onboarding-icon" viewBox="0 0 40 40" fill="none" stroke="rgba(232,130,12,0.7)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="6" y="12" width="28" height="16" rx="2" fill="rgba(232,130,12,0.05)"/>
-                  <path d="M10 22h8M10 24h6"/>
-                  <path d="M24 22h6M24 24h4"/>
-                  <path d="M10 18h20" strokeDasharray="2 1.5"/>
-                  <path d="M3 20l4-2v4zM37 20l-4-2v4z" fill="rgba(232,130,12,0.3)"/>
+                <svg className="onboarding-icon" viewBox="0 0 48 48" fill="none" stroke="rgba(232,130,12,0.7)" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+                  {/* Waveform box */}
+                  <rect x="4" y="10" width="40" height="20" rx="3" fill="rgba(232,130,12,0.05)" />
+                  {/* Waveform bars */}
+                  <line x1="10" y1="24" x2="10" y2="16" strokeWidth="2" stroke="rgba(232,130,12,0.3)" />
+                  <line x1="14" y1="26" x2="14" y2="14" strokeWidth="2" stroke="rgba(232,130,12,0.4)" />
+                  <line x1="18" y1="25" x2="18" y2="15" strokeWidth="2" stroke="rgba(232,130,12,0.5)" />
+                  <line x1="22" y1="23" x2="22" y2="17" strokeWidth="2" stroke="rgba(232,130,12,0.6)" />
+                  <line x1="26" y1="26" x2="26" y2="14" strokeWidth="2" stroke="rgba(232,130,12,0.5)" />
+                  <line x1="30" y1="24" x2="30" y2="16" strokeWidth="2" stroke="rgba(232,130,12,0.4)" />
+                  <line x1="34" y1="25" x2="34" y2="15" strokeWidth="2" stroke="rgba(232,130,12,0.3)" />
+                  <line x1="38" y1="23" x2="38" y2="17" strokeWidth="2" stroke="rgba(232,130,12,0.2)" />
+                  {/* Drop arrow */}
+                  <path d="M24 32v8" strokeWidth="1.5" />
+                  <path d="M20 37l4 4 4-4" strokeWidth="1.5" />
+                  {/* Music note */}
+                  <circle cx="11" cy="42" r="2" fill="rgba(232,130,12,0.4)" stroke="none" />
+                  <path d="M13 42v-6l6-2v6" strokeWidth="1.2" />
+                  <circle cx="19" cy="40" r="2" fill="rgba(232,130,12,0.4)" stroke="none" />
                 </svg>
                 <div>
                   <strong>LOAD TRACKS</strong>
@@ -530,7 +690,7 @@ export default function App() {
               </div>
             </div>
             <p className="onboarding-disclaimer">This project is still in active development. Some features may not work as expected.</p>
-            <button className="onboarding-close-btn" onClick={() => setShowOnboarding(false)}>GOT IT</button>
+            <button className="onboarding-close-btn" onClick={dismissOnboarding}>GOT IT</button>
           </div>
         </div>
       )}
@@ -541,10 +701,13 @@ export default function App() {
 
       <div className="ctrl-header">
         <div className="brand">
-          <span className="brand-title">MAESTRO</span>
-          <span className="brand-sub">TOUCHLESS DJ CONTROLLER</span>
+          <img src={`${process.env.PUBLIC_URL}/maestro-logo.png`} alt="Maestro" className="brand-logo" />
+          <span className="brand-sub">GESTURE CONTROLLED DJ CONSOLE</span>
         </div>
-        <div className="instructions">PINCH to grab &bull; DRAG to adjust &bull; TAP pads</div>
+        <div className="instructions">
+          PINCH to grab &bull; DRAG to adjust &bull; TAP pads
+          <button className="help-btn" onClick={() => setShowOnboarding(true)}>HELP</button>
+        </div>
       </div>
 
       <div className="ctrl-main">
@@ -557,19 +720,19 @@ export default function App() {
               {renderMixFader('eq-high-A', 'HI', djState.A.eqHigh, -12, 12)}
               {renderMixFader('eq-mid-A', 'MID', djState.A.eqMid, -12, 12)}
               {renderMixFader('eq-low-A', 'LOW', djState.A.eqLow, -12, 12)}
-              {renderMixFader('filter-A', 'FLT', djState.A.filter, 60, 20000)}
-              {renderMixFader('delay-A', 'FX', djState.A.delay, 0, 1)}
             </div>
             <div className="eq-col">
               {renderMixFader('eq-high-B', 'HI', djState.B.eqHigh, -12, 12)}
               {renderMixFader('eq-mid-B', 'MID', djState.B.eqMid, -12, 12)}
               {renderMixFader('eq-low-B', 'LOW', djState.B.eqLow, -12, 12)}
-              {renderMixFader('filter-B', 'FLT', djState.B.filter, 60, 20000)}
-              {renderMixFader('delay-B', 'FX', djState.B.delay, 0, 1)}
             </div>
           </div>
 
+          <div className="dot-grid" />
+
           <div className="faders-row">
+            {renderMixFader('filter-A', 'FLT', djState.A.filter, 60, 20000)}
+            {renderMixFader('delay-A', 'FX', djState.A.delay, 0, 1)}
             {renderMeter('A')}
             <div className="fader-group vol-fader">
               <span className="fader-label">CH 1</span>
@@ -602,6 +765,8 @@ export default function App() {
               </div>
             </div>
             {renderMeter('B')}
+            {renderMixFader('filter-B', 'FLT', djState.B.filter, 60, 20000)}
+            {renderMixFader('delay-B', 'FX', djState.B.delay, 0, 1)}
           </div>
 
           <div className="crossfader-area">
@@ -623,6 +788,7 @@ export default function App() {
         {renderDeck('B')}
       </div>
     </div>
+    <a href="https://anmolbhardwaj.com" target="_blank" rel="noopener noreferrer" className="controller-tagline">ANMOLBHARDWAJ.COM</a>
     </div>
   );
 }
