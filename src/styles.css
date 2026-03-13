@@ -1308,6 +1308,13 @@ body {
   border: 2px solid rgba(232,130,12,0.25);
 }
 
+/* ─── Desktop Scale Wrapper (for smaller screens like MacBook 14") ─── */
+.desktop-scale-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 /* ─── Mobile View ─── */
 @media (max-width: 900px) {
   body { overflow: hidden; }

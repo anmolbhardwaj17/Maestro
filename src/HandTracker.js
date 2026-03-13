@@ -199,32 +199,47 @@ export default function HandTracker({ onHandData, rotated, mobileScale }) {
 
     setup();
 
-    const handleVisibility = async () => {
-      if (document.hidden) {
-        if (rafRef.current) cancelAnimationFrame(rafRef.current);
-        if (video.srcObject) {
-          video.srcObject.getTracks().forEach(t => t.stop());
-          video.srcObject = null;
-        }
-      } else {
-        if (cancelled || !landmarkerRef.current) return;
-        try {
-          const newStream = await navigator.mediaDevices.getUserMedia({
-            video: { width: 640, height: 480, facingMode: 'user' },
-          });
-          if (cancelled) { newStream.getTracks().forEach(t => t.stop()); return; }
-          video.srcObject = newStream;
-          await video.play();
-          lastTimeRef.current = -1;
-          if (detectFnRef.current) detectFnRef.current();
-        } catch (e) { /* camera may not be available */ }
+    const stopCamera = () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+      if (video.srcObject) {
+        video.srcObject.getTracks().forEach(t => t.stop());
+        video.srcObject = null;
       }
     };
+
+    const startCamera = async () => {
+      if (cancelled || !landmarkerRef.current) return;
+      if (video.srcObject) return; // already running
+      try {
+        const newStream = await navigator.mediaDevices.getUserMedia({
+          video: { width: 640, height: 480, facingMode: 'user' },
+        });
+        if (cancelled) { newStream.getTracks().forEach(t => t.stop()); return; }
+        video.srcObject = newStream;
+        await video.play();
+        lastTimeRef.current = -1;
+        if (detectFnRef.current) detectFnRef.current();
+      } catch (e) { /* camera may not be available */ }
+    };
+
+    // Stop camera when tab is hidden OR window loses focus (switching apps)
+    const handleVisibility = () => {
+      if (document.hidden) stopCamera();
+      else startCamera();
+    };
+    const handleBlur = () => stopCamera();
+    const handleFocus = () => { if (!document.hidden) startCamera(); };
+
     document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('blur', handleBlur);
+    window.addEventListener('focus', handleFocus);
 
     return () => {
       cancelled = true;
       document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('blur', handleBlur);
+      window.removeEventListener('focus', handleFocus);
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       if (landmarkerRef.current) landmarkerRef.current.close();
       if (video.srcObject) {

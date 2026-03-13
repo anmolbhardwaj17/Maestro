@@ -190,7 +190,25 @@ export default function App() {
     const availH = isPortrait ? vp.width : vp.height;
     return Math.min(availW / 1440, availH / 880) * 0.96;
   });
+  const [desktopScale, setDesktopScale] = useState(1);
   const [isRotated, setIsRotated] = useState(false);
+
+  // Desktop scale: uniformly shrink controller on smaller screens
+  useEffect(() => {
+    if (isMobile) return;
+    const calcDesktopScale = () => {
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      // Controller wants 1400x860, reserve 120px for page title + tagline + breathing room
+      const scaleW = (vw * 0.92) / 1400;
+      const scaleH = (vh - 120) / 860;
+      const s = Math.min(scaleW, scaleH, 1); // never scale up beyond 1
+      setDesktopScale(s);
+    };
+    calcDesktopScale();
+    window.addEventListener('resize', calcDesktopScale);
+    return () => window.removeEventListener('resize', calcDesktopScale);
+  }, [isMobile]);
 
   useEffect(() => {
     if (!isMobile) return;
@@ -394,7 +412,7 @@ export default function App() {
       const isGrabbing = hand.pinching && interaction.grabbed;
       let cursorX, cursorY, snapInfo;
       if (isGrabbing) { cursorX = hand.x; cursorY = hand.y; snapInfo = { snappedTo: interaction.grabbed }; }
-      else { snapInfo = magneticSnap(hand.x, hand.y, mobileScale, txInfo); cursorX = snapInfo.x; cursorY = snapInfo.y; }
+      else { snapInfo = magneticSnap(hand.x, hand.y, isMobile ? mobileScale : desktopScale, txInfo); cursorX = snapInfo.x; cursorY = snapInfo.y; }
       displayPositions.push({ x: cursorX, y: cursorY, pinching: hand.pinching, snapped: snapInfo.snappedTo !== null && !isGrabbing });
       if (snapInfo.snappedTo) newSnapped = snapInfo.snappedTo;
       // Use elementFromPoint with correct viewport coords (works for both rotated and non-rotated)
@@ -437,7 +455,7 @@ export default function App() {
         if (cel) {
           const r = cel.getBoundingClientRect();
           const { x: ecx, y: ecy } = viewportToContainer(r.left + r.width / 2, r.top + r.height / 2, txInfo);
-          if (Math.hypot(hand.x - ecx, hand.y - ecy) > MAX_DRAG_DIST / mobileScale) { interaction.grabbed = null; return; }
+          if (Math.hypot(hand.x - ecx, hand.y - ecy) > MAX_DRAG_DIST / (isMobile ? mobileScale : desktopScale)) { interaction.grabbed = null; return; }
         }
         newGrabbed = cid;
         if (def) {
@@ -466,7 +484,7 @@ export default function App() {
     });
     for (let i = handsData.length; i < 2; i++) interactionRef.current[i].grabbed = null;
     setHandPositions(displayPositions); setHoveredControl(newHovered); setGrabbedControl(newGrabbed); setSnappedControl(newSnapped);
-  }, [getControlValue, applyControl, togglePlay, triggerPad, mobileScale, isRotated]);
+  }, [getControlValue, applyControl, togglePlay, triggerPad, mobileScale, desktopScale, isMobile, isRotated]);
 
   const mouseInteraction = useRef({ active: false, controlId: null, startY: 0, startX: 0, startValue: 0 });
   const handleMouseDown = useCallback((controlId) => (e) => {
@@ -757,7 +775,7 @@ export default function App() {
       <img src={`${process.env.PUBLIC_URL}/maestro-logo.png`} alt="Maestro" className="page-logo" />
       <span className="page-title-sub">NO HARDWARE &middot; NO TOUCH &middot; JUST GESTURES</span>
     </div>
-    <HandTracker onHandData={handleHandData} rotated={isRotated} mobileScale={mobileScale} />
+    <HandTracker onHandData={handleHandData} rotated={isRotated} mobileScale={isMobile ? mobileScale : desktopScale} />
     {handPositions.map((h, i) => (
       <div key={i} className={`hand-cursor ${h.pinching ? 'pinched' : 'open'}${h.snapped ? ' snapped' : ''}`} style={{ left: h.x, top: h.y }} />
     ))}
@@ -862,8 +880,8 @@ export default function App() {
         </div>
       </div>
     )}
-    <div className={isMobile ? 'mobile-scale-wrap' : undefined} style={isMobile ? { width: 1400 * mobileScale, height: 860 * mobileScale } : undefined}>
-    <div className="controller fade-in" style={isMobile ? { transform: `scale(${mobileScale})`, transformOrigin: 'top left' } : undefined}>
+    <div className={isMobile ? 'mobile-scale-wrap' : 'desktop-scale-wrap'} style={isMobile ? { width: 1400 * mobileScale, height: 860 * mobileScale } : undefined}>
+    <div className="controller fade-in" style={isMobile ? { transform: `scale(${mobileScale})`, transformOrigin: 'top left' } : desktopScale < 1 ? { transform: `scale(${desktopScale})` } : undefined}>
       <div className="ctrl-header">
         <div className="brand">
           <img src={`${process.env.PUBLIC_URL}/maestro-logo.png`} alt="Maestro" className="brand-logo" />
