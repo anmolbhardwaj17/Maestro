@@ -5,6 +5,8 @@ class DJAudioEngine {
     this.crossfader = 0.5;
     this.masterGain = null;
     this.initialized = false;
+    this._unlocked = false;
+    this._rawTrackData = {}; // stores ArrayBuffer data before context exists
   }
 
   init() {
@@ -73,15 +75,39 @@ class DJAudioEngine {
     this.initialized = true;
   }
 
-  async loadTrack(deckId, file) {
-    this.init();
-    const arrayBuffer = await file.arrayBuffer();
-    const audioBuffer = await this.ctx.decodeAudioData(arrayBuffer);
-    const deck = this.decks[deckId];
-    if (deck.playing) this.stop(deckId);
-    deck.buffer = audioBuffer;
-    deck.pauseOffset = 0;
+  // Store raw audio data for later decoding (no AudioContext needed)
+  storeRawTrack(deckId, arrayBuffer) {
+    this._rawTrackData[deckId] = arrayBuffer;
+    // If already initialized, decode immediately
+    if (this.initialized) {
+      this._decodeRawTrack(deckId);
+    }
+  }
 
+  async _decodeRawTrack(deckId) {
+    const data = this._rawTrackData[deckId];
+    if (!data || !this.initialized) return;
+    delete this._rawTrackData[deckId];
+    try {
+      const audioBuffer = await this.ctx.decodeAudioData(data);
+      const deck = this.decks[deckId];
+      if (deck.playing) this.stop(deckId);
+      deck.buffer = audioBuffer;
+      deck.pauseOffset = 0;
+      this._computeWaveform(deck, audioBuffer);
+    } catch (e) {
+      console.error('Failed to decode audio for deck', deckId, e);
+    }
+  }
+
+  async _decodePendingTracks() {
+    const deckIds = Object.keys(this._rawTrackData);
+    for (const deckId of deckIds) {
+      await this._decodeRawTrack(deckId);
+    }
+  }
+
+  _computeWaveform(deck, audioBuffer) {
     const channelData = audioBuffer.getChannelData(0);
     const numSamples = 300;
     const step = Math.floor(channelData.length / numSamples);
@@ -98,11 +124,55 @@ class DJAudioEngine {
       peaks.push(max);
     }
     deck.waveformPeaks = peaks;
+  }
+
+  // Must be called from a user gesture (click/touch) to unlock audio on iOS
+  unlock() {
+    if (!this._unlocked) {
+      this.init();
+      // Play a silent buffer via Web Audio — unlocks AudioContext
+      const buf = this.ctx.createBuffer(1, 1, 22050);
+      const src = this.ctx.createBufferSource();
+      src.buffer = buf;
+      src.connect(this.ctx.destination);
+      src.start(0);
+
+      // Also play via <audio> element — switches iOS audio session from
+      // "ambient" (muted by ringer switch) to "playback" (always audible)
+      try {
+        const silentDataUri = 'data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4Ljc2LjEwMAAAAAAAAAAAAAAA//tQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWGluZwAAAA8AAAACAAABhgC7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7//////////////////////////////////////////////////////////////////8AAAAATGF2YzU4LjEzAAAAAAAAAAAAAAAAJAAAAAAAAAAAAYYoRwMHAAAAAAD/+1DEAAAHAAGf9AAAIiWmM/zUgBAAADSAAAAEhGIxjcQBEYwxaggCIIAkfg+D5+sEH4PlgQ/B8uCAIAgfLg+D5/8uD5//5cHy4PqBAEP/KAAB4sXLhB4PBjf/4Pg+XIAAAA//tQxBkAAADSAAAAAAAAANIAAAAASEFUBIQAAApLoCYmBJiWIGBgaQSDYJQRjFEQIJBCkqAIhmM4JhAJBiiCSoX2UtREPgxCgnCgmLIpLlEk3zF7Moj/+xDE/wAAA0gAAAAAIAAANIAAAAT/4Mf/xRBEAAAAAAA=';
+        const audio = document.createElement('audio');
+        audio.controls = false;
+        audio.preload = 'auto';
+        audio.loop = false;
+        audio.src = silentDataUri;
+        audio.play().catch(() => {});
+      } catch (e) {}
+
+      this._unlocked = true;
+      // Decode any pre-fetched track data
+      this._decodePendingTracks();
+    }
+    // Always try to resume (even if already unlocked)
+    if (this.ctx && this.ctx.state === 'suspended') {
+      this.ctx.resume();
+    }
+  }
+
+  async loadTrack(deckId, file) {
+    this.init();
+    const arrayBuffer = await file.arrayBuffer();
+    const audioBuffer = await this.ctx.decodeAudioData(arrayBuffer);
+    const deck = this.decks[deckId];
+    if (deck.playing) this.stop(deckId);
+    deck.buffer = audioBuffer;
+    deck.pauseOffset = 0;
+    this._computeWaveform(deck, audioBuffer);
     return audioBuffer;
   }
 
   play(deckId) {
-    this.init();
+    if (!this.initialized) return;
     if (this.ctx.state === 'suspended') this.ctx.resume();
     const deck = this.decks[deckId];
     if (!deck || !deck.buffer || deck.playing) return;
@@ -149,7 +219,7 @@ class DJAudioEngine {
   }
 
   togglePlay(deckId) {
-    this.init();
+    if (!this.initialized) return false;
     const deck = this.decks[deckId];
     if (!deck) return false;
     if (deck.playing) this.pause(deckId);
@@ -159,6 +229,7 @@ class DJAudioEngine {
 
   setPitch(deckId, rate) {
     const deck = this.decks[deckId];
+    if (!deck) return;
     if (deck.playing && deck.source) {
       const elapsed = this.ctx.currentTime - deck.startTime;
       deck.pauseOffset = deck.pauseOffset + elapsed * deck.pitch;
@@ -170,6 +241,7 @@ class DJAudioEngine {
 
   setVolume(deckId, vol) {
     const deck = this.decks[deckId];
+    if (!deck) return;
     deck.volume = Math.max(0, Math.min(1, vol));
     this._updateGains();
   }
@@ -189,6 +261,7 @@ class DJAudioEngine {
 
   setEQ(deckId, band, value) {
     const deck = this.decks[deckId];
+    if (!deck) return;
     const dbValue = Math.max(-12, Math.min(12, value));
     if (band === 'low') deck.eqLow.gain.value = dbValue;
     else if (band === 'mid') deck.eqMid.gain.value = dbValue;
@@ -196,11 +269,13 @@ class DJAudioEngine {
   }
 
   setFilter(deckId, freq) {
+    if (!this.decks[deckId]) return;
     this.decks[deckId].filter.frequency.value = Math.max(60, Math.min(20000, freq));
   }
 
   setDelayMix(deckId, mix) {
     const deck = this.decks[deckId];
+    if (!deck) return;
     const val = Math.max(0, Math.min(1, mix));
     deck.delayFeedback.gain.value = val * 0.6;
     deck.delayWet.gain.value = val * 0.5;

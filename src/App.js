@@ -109,31 +109,58 @@ const CONTROL_DEFS = {
   crossfader:  { min: 0, max: 1, sens: 0.006, type: 'slider', horizontal: true },
 };
 
-// Convert viewport coords to rotated container coords
-function fromViewport(vx, vy, isRotated) {
-  if (!isRotated) return { x: vx, y: vy };
-  // Use root element's actual layout width (= CSS 100dvh) instead of window.innerHeight
-  // These can differ on mobile Safari due to address bar, safe areas, bottom nav
+// Get transform info from #root using the browser's own DOMMatrix.
+// This avoids manual coordinate math that can break on mobile Safari
+// due to dvh/innerHeight mismatches with address bar, safe areas, bottom nav.
+function getTransformInfo(isRotated) {
+  if (!isRotated) return null;
   const root = document.getElementById('root');
-  const containerW = root ? root.offsetWidth : window.innerHeight;
-  return { x: containerW - vy, y: vx };
+  if (!root) return null;
+  const matrix = new DOMMatrix(getComputedStyle(root).transform);
+  const rootRect = root.getBoundingClientRect();
+  return {
+    matrix,
+    invMatrix: matrix.inverse(),
+    vpCx: rootRect.left + rootRect.width / 2,
+    vpCy: rootRect.top + rootRect.height / 2,
+    ox: root.offsetWidth / 2,
+    oy: root.offsetHeight / 2,
+  };
 }
 
-function magneticSnap(rawX, rawY, scale = 1, isRotated = false) {
+// Container coords → viewport coords (uses browser's own transform math)
+function containerToViewport(cx, cy, txInfo) {
+  if (!txInfo) return { vx: cx, vy: cy };
+  const pt = txInfo.matrix.transformPoint(new DOMPoint(cx - txInfo.ox, cy - txInfo.oy));
+  return { vx: txInfo.vpCx + pt.x, vy: txInfo.vpCy + pt.y };
+}
+
+// Viewport coords → container coords (inverse of above)
+function viewportToContainer(vx, vy, txInfo) {
+  if (!txInfo) return { x: vx, y: vy };
+  const pt = txInfo.invMatrix.transformPoint(new DOMPoint(vx - txInfo.vpCx, vy - txInfo.vpCy));
+  return { x: txInfo.ox + pt.x, y: txInfo.oy + pt.y };
+}
+
+function magneticSnap(rawX, rawY, scale = 1, txInfo = null) {
   const radius = SNAP_RADIUS / scale;
+  // Convert hand position to viewport space
+  const { vx: hvx, vy: hvy } = containerToViewport(rawX, rawY, txInfo);
   const controls = document.querySelectorAll('[data-control]');
-  let nearest = null, nearestDist = Infinity, ncx = rawX, ncy = rawY;
+  let nearest = null, nearestDist = Infinity, nvx = hvx, nvy = hvy;
   controls.forEach((el) => {
     const r = el.getBoundingClientRect();
-    const viewCx = r.left + r.width / 2, viewCy = r.top + r.height / 2;
-    // Convert bounding rect center from viewport to container space
-    const { x: ecx, y: ecy } = fromViewport(viewCx, viewCy, isRotated);
-    const d = Math.hypot(rawX - ecx, rawY - ecy);
-    if (d < nearestDist) { nearestDist = d; nearest = el.dataset.control; ncx = ecx; ncy = ecy; }
+    const ecx = r.left + r.width / 2, ecy = r.top + r.height / 2;
+    const d = Math.hypot(hvx - ecx, hvy - ecy);
+    if (d < nearestDist) { nearestDist = d; nearest = el.dataset.control; nvx = ecx; nvy = ecy; }
   });
   if (nearest && nearestDist < radius) {
     const t = SNAP_STRENGTH * (1 - nearestDist / radius);
-    return { x: rawX + (ncx - rawX) * t, y: rawY + (ncy - rawY) * t, snappedTo: nearest };
+    const snapVx = hvx + (nvx - hvx) * t;
+    const snapVy = hvy + (nvy - hvy) * t;
+    // Convert snapped position back to container space
+    const { x, y } = viewportToContainer(snapVx, snapVy, txInfo);
+    return { x, y, snappedTo: nearest };
   }
   return { x: rawX, y: rawY, snappedTo: null };
 }
@@ -219,45 +246,68 @@ export default function App() {
   const djStateRef = useRef(djState);
   useEffect(() => { djStateRef.current = djState; }, [djState]);
 
-  // Sync engine with default UI state on mount
+  // Audio setup: fetch raw mp3 data on mount, create AudioContext on first gesture
+  const trackNamesRef = useRef({ A: 'House Track 1', B: 'House Track 2' });
   useEffect(() => {
-    engine.init();
-    ['A', 'B'].forEach((deck) => {
-      engine.setVolume(deck, 0.8);
-      engine.setPitch(deck, 1.0);
-      engine.setEQ(deck, 'low', 0);
-      engine.setEQ(deck, 'mid', 0);
-      engine.setEQ(deck, 'high', 0);
-      engine.setFilter(deck, 20000);
-      engine.setDelayMix(deck, 0);
-    });
-    engine.setCrossfader(0.5);
-
-    // Load default tracks on mount
-    const loadDefault = async (deck, url, name) => {
-      try {
-        const resp = await fetch(url);
-        const blob = await resp.blob();
-        const file = new File([blob], name, { type: 'audio/mpeg' });
-        await engine.loadTrack(deck, file);
-        setDjState((s) => ({ ...s, [deck]: { ...s[deck], loaded: true, trackName: name } }));
-      } catch (e) { /* silently fail if default tracks missing */ }
+    // 1. Pre-fetch mp3 files as raw ArrayBuffers (no AudioContext needed)
+    const fetchRaw = async () => {
+      const tracks = [
+        { url: `${process.env.PUBLIC_URL}/house_1.mp3`, deck: 'A' },
+        { url: `${process.env.PUBLIC_URL}/house_2.mp3`, deck: 'B' },
+      ];
+      for (const t of tracks) {
+        try {
+          const resp = await fetch(t.url);
+          if (!resp.ok) continue;
+          const buf = await resp.arrayBuffer();
+          engine.storeRawTrack(t.deck, buf);
+        } catch (e) { /* fetch failed */ }
+      }
     };
-    loadDefault('A', `${process.env.PUBLIC_URL}/house_1.mp3`, 'House Track 1');
-    loadDefault('B', `${process.env.PUBLIC_URL}/house_2.mp3`, 'House Track 2');
+    fetchRaw();
 
-    // Resume AudioContext on first user gesture (required on mobile)
-    const resumeAudio = () => {
-      if (engine.ctx?.state === 'suspended') engine.ctx.resume();
-      document.removeEventListener('touchstart', resumeAudio);
-      document.removeEventListener('click', resumeAudio);
+    // 2. On first user gesture: create AudioContext + unlock + decode pending tracks
+    const unlockOnGesture = () => {
+      engine.unlock();
+      ['A', 'B'].forEach((deck) => {
+        engine.setVolume(deck, 0.8);
+        engine.setPitch(deck, 1.0);
+        engine.setEQ(deck, 'low', 0);
+        engine.setEQ(deck, 'mid', 0);
+        engine.setEQ(deck, 'high', 0);
+        engine.setFilter(deck, 20000);
+        engine.setDelayMix(deck, 0);
+      });
+      engine.setCrossfader(0.5);
+      document.removeEventListener('touchstart', unlockOnGesture, true);
+      document.removeEventListener('touchend', unlockOnGesture, true);
+      document.removeEventListener('click', unlockOnGesture, true);
     };
-    document.addEventListener('touchstart', resumeAudio, { once: true });
-    document.addEventListener('click', resumeAudio, { once: true });
+    document.addEventListener('touchstart', unlockOnGesture, true);
+    document.addEventListener('touchend', unlockOnGesture, true);
+    document.addEventListener('click', unlockOnGesture, true);
+
+    // 3. Poll for decoded tracks and update UI state (avoids callback race conditions)
+    const poll = setInterval(() => {
+      ['A', 'B'].forEach((deck) => {
+        if (engine.decks[deck]?.buffer) {
+          setDjState((s) => {
+            if (s[deck].loaded) return s; // already set
+            return { ...s, [deck]: { ...s[deck], loaded: true, trackName: trackNamesRef.current[deck] } };
+          });
+        }
+      });
+      // Stop polling once both loaded
+      if (engine.decks['A']?.buffer && engine.decks['B']?.buffer) clearInterval(poll);
+    }, 200);
+
     return () => {
-      document.removeEventListener('touchstart', resumeAudio);
-      document.removeEventListener('click', resumeAudio);
+      clearInterval(poll);
+      document.removeEventListener('touchstart', unlockOnGesture, true);
+      document.removeEventListener('touchend', unlockOnGesture, true);
+      document.removeEventListener('click', unlockOnGesture, true);
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const waveformCanvasA = useRef(null);
   const waveformCanvasB = useRef(null);
@@ -279,7 +329,7 @@ export default function App() {
 
   const applyControl = useCallback((controlId, value) => {
     const def = CONTROL_DEFS[controlId]; if (!def) return;
-    engine.init();
+    engine.unlock();
     const snapped = applyValueSnap(controlId, Math.max(def.min, Math.min(def.max, value)));
     if (controlId === 'crossfader') { engine.setCrossfader(snapped); setDjState((s) => ({ ...s, crossfader: snapped })); return; }
     const parts = controlId.split('-'); const deck = parts[parts.length - 1]; const key = parts.slice(0, -1).join('-');
@@ -305,10 +355,27 @@ export default function App() {
     setTimeout(() => setActivePads((p) => ({ ...p, [padKey]: false })), 150);
   }, []);
 
-  const togglePlay = useCallback((deck) => { engine.init(); const p = engine.togglePlay(deck); setDjState((s) => ({ ...s, [deck]: { ...s[deck], playing: p } })); }, []);
+  const togglePlay = useCallback((deck) => {
+    engine.unlock();
+    // If tracks are still decoding after unlock, wait for them
+    if (!engine.decks[deck]?.buffer) {
+      const check = setInterval(() => {
+        if (engine.decks[deck]?.buffer) {
+          clearInterval(check);
+          const p = engine.togglePlay(deck);
+          setDjState((s) => ({ ...s, [deck]: { ...s[deck], playing: p } }));
+        }
+      }, 100);
+      // Give up after 5 seconds
+      setTimeout(() => clearInterval(check), 5000);
+      return;
+    }
+    const p = engine.togglePlay(deck);
+    setDjState((s) => ({ ...s, [deck]: { ...s[deck], playing: p } }));
+  }, []);
 
   const loadTrack = useCallback(async (deck, file) => {
-    engine.init();
+    engine.unlock();
     await engine.loadTrack(deck, file);
     setDjState((s) => ({ ...s, [deck]: { ...s[deck], loaded: true, trackName: file.name, playing: false } }));
   }, []);
@@ -318,6 +385,8 @@ export default function App() {
   const handleDragLeave = (e) => { e.currentTarget.classList.remove('drag-over'); };
 
   const handleHandData = useCallback((handsData) => {
+    // Get transform info once per frame (uses browser's DOMMatrix — correct for any CSS transform)
+    const txInfo = getTransformInfo(isRotated);
     let newHovered = null, newGrabbed = null, newSnapped = null;
     const displayPositions = [];
     handsData.forEach((hand, i) => {
@@ -325,15 +394,14 @@ export default function App() {
       const isGrabbing = hand.pinching && interaction.grabbed;
       let cursorX, cursorY, snapInfo;
       if (isGrabbing) { cursorX = hand.x; cursorY = hand.y; snapInfo = { snappedTo: interaction.grabbed }; }
-      else { snapInfo = magneticSnap(hand.x, hand.y, mobileScale, isRotated); cursorX = snapInfo.x; cursorY = snapInfo.y; }
+      else { snapInfo = magneticSnap(hand.x, hand.y, mobileScale, txInfo); cursorX = snapInfo.x; cursorY = snapInfo.y; }
       displayPositions.push({ x: cursorX, y: cursorY, pinching: hand.pinching, snapped: snapInfo.snappedTo !== null && !isGrabbing });
       if (snapInfo.snappedTo) newSnapped = snapInfo.snappedTo;
-      let controlId = snapInfo.snappedTo;
-      if (!isRotated) {
-        const el = document.elementFromPoint(cursorX, cursorY);
-        const controlEl = el?.closest('[data-control]');
-        controlId = controlEl?.dataset?.control || snapInfo.snappedTo;
-      }
+      // Use elementFromPoint with correct viewport coords (works for both rotated and non-rotated)
+      const { vx: hvx, vy: hvy } = containerToViewport(cursorX, cursorY, txInfo);
+      const el = document.elementFromPoint(hvx, hvy);
+      const controlEl = el?.closest('[data-control]');
+      let controlId = controlEl?.dataset?.control || snapInfo.snappedTo;
       if (controlId) newHovered = controlId;
       if (hand.justPinched) {
         interaction.pinchStartTime = performance.now();
@@ -355,13 +423,9 @@ export default function App() {
         const dt = performance.now() - interaction.pinchStartTime;
         const dist = Math.hypot(hand.x - interaction.pinchStartPos.x, hand.y - interaction.pinchStartPos.y);
         if (dt < TAP_MAX_DURATION && dist < TAP_MAX_MOVE) {
-          let padEl = null;
-          if (isRotated) {
-            if (controlId?.startsWith('pad-')) padEl = { dataset: { control: controlId } };
-          } else {
-            padEl = document.elementFromPoint(hand.x, hand.y)?.closest('[data-control^="pad-"]');
-          }
-          if (padEl && !controlId?.startsWith('pad-')) {
+          const { vx: pvx, vy: pvy } = containerToViewport(hand.x, hand.y, txInfo);
+          const padEl = document.elementFromPoint(pvx, pvy)?.closest('[data-control^="pad-"]');
+          if (padEl) {
             triggerPad(padEl.dataset.control.replace('pad-', ''));
           }
         }
@@ -370,7 +434,11 @@ export default function App() {
         const cid = interaction.grabbed;
         const def = CONTROL_DEFS[cid];
         const cel = document.querySelector(`[data-control="${cid}"]`);
-        if (cel) { const r = cel.getBoundingClientRect(); const { x: ecx, y: ecy } = fromViewport(r.left+r.width/2, r.top+r.height/2, isRotated); if (Math.hypot(hand.x - ecx, hand.y - ecy) > MAX_DRAG_DIST / mobileScale) { interaction.grabbed = null; return; } }
+        if (cel) {
+          const r = cel.getBoundingClientRect();
+          const { x: ecx, y: ecy } = viewportToContainer(r.left + r.width / 2, r.top + r.height / 2, txInfo);
+          if (Math.hypot(hand.x - ecx, hand.y - ecy) > MAX_DRAG_DIST / mobileScale) { interaction.grabbed = null; return; }
+        }
         newGrabbed = cid;
         if (def) {
           const rawDx = hand.x - interaction.lastX;
@@ -648,8 +716,7 @@ export default function App() {
   };
 
   const dismissOnboarding = useCallback(() => {
-    engine.init();
-    if (engine.ctx?.state === 'suspended') engine.ctx.resume();
+    engine.unlock();
     setShowOnboarding(false);
     localStorage.setItem('maestro-onboarding-seen', Date.now().toString());
   }, []);
@@ -677,15 +744,16 @@ export default function App() {
           <img src={`${process.env.PUBLIC_URL}/maestro-logo.png`} alt="Maestro" className="mobile-logo" />
           <p className="mobile-text">WORKS BEST ON DESKTOP</p>
           <p className="mobile-sub">Maestro requires a webcam and a larger screen for the best gesture control experience.</p>
-          <button className="mobile-btn" onClick={() => { engine.init(); if (engine.ctx?.state === 'suspended') engine.ctx.resume(); setShowMobileWarning(false); }}>CONTINUE ANYWAY</button>
+          <button className="mobile-btn" onClick={() => { engine.unlock(); setShowMobileWarning(false); }}>CONTINUE ANYWAY</button>
         </div>
+        <p style={{ position: 'absolute', bottom: 24, left: 0, right: 0, textAlign: 'center', color: '#e8640c', fontSize: 12, margin: 0, padding: '0 20px' }}>Turn off silent mode to hear audio<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#e8640c" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ verticalAlign: 'middle', marginLeft: 6 }}><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg></p>
       </div>
     );
   }
 
   return (
     <div className="controller-bg">
-    <div className="page-title">
+<div className="page-title">
       <img src={`${process.env.PUBLIC_URL}/maestro-logo.png`} alt="Maestro" className="page-logo" />
       <span className="page-title-sub">NO HARDWARE &middot; NO TOUCH &middot; JUST GESTURES</span>
     </div>

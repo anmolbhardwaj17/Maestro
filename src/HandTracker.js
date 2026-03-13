@@ -141,16 +141,16 @@ export default function HandTracker({ onHandData, rotated, mobileScale }) {
             pinchAngle,
           });
 
-          // Convert landmarks to screen coords — translate to amplified cursor position but keep natural hand size
-          // Use wrist (landmark 0) as anchor point
-          const wristNatX = isRot ? landmarks[0].y * screenW : (1 - landmarks[0].x) * screenW;
-          const wristNatY = isRot ? landmarks[0].x * screenH : landmarks[0].y * screenH;
-          const wristAmpX = ampX(wristNatX);
-          const wristAmpY = ampY(wristNatY);
+          // Convert landmarks to screen coords — anchor on index tip (landmark 8)
+          // so wireframe aligns with the cursor, but keep natural hand size
+          const tipNatX = isRot ? indexTip.y * screenW : (1 - indexTip.x) * screenW;
+          const tipNatY = isRot ? indexTip.x * screenH : indexTip.y * screenH;
+          const tipAmpX = ampX(tipNatX);
+          const tipAmpY = ampY(tipNatY);
           const pts = landmarks.map((lm) => {
             const natX = isRot ? lm.y * screenW : (1 - lm.x) * screenW;
             const natY = isRot ? lm.x * screenH : lm.y * screenH;
-            return { x: natX - wristNatX + wristAmpX, y: natY - wristNatY + wristAmpY };
+            return { x: natX - tipNatX + tipAmpX, y: natY - tipNatY + tipAmpY };
           });
 
           // Draw semi-transparent hand silhouette
@@ -168,7 +168,8 @@ export default function HandTracker({ onHandData, rotated, mobileScale }) {
             ctx.beginPath();
             ctx.moveTo(pts[f[0]].x, pts[f[0]].y);
             f.forEach((fi) => ctx.lineTo(pts[fi].x, pts[fi].y));
-            ctx.lineWidth = isPinched ? 22 : 28;
+            const isMob = mobileScaleRef.current < 1;
+            ctx.lineWidth = isMob ? (isPinched ? 10 : 14) : (isPinched ? 22 : 28);
             ctx.lineCap = 'round'; ctx.lineJoin = 'round';
             ctx.strokeStyle = isPinched ? 'rgba(232,100,12,0.12)' : 'rgba(100,100,100,0.12)';
             ctx.stroke();

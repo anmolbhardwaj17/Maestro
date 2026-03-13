@@ -1377,6 +1377,15 @@ body {
     transform: scaleX(-1) rotate(90deg);
   }
 
+  .hand-cursor {
+    width: 16px;
+    height: 16px;
+  }
+  .hand-cursor.pinched {
+    width: 10px;
+    height: 10px;
+  }
+
   .onboarding-overlay {
     position: fixed;
     inset: 0;
